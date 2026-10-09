@@ -9,6 +9,7 @@ NatLean は「自然言語版 Lean」。自然言語の論証を主張に分割�
 - `src/natlean/__init__.py` — 公開 API と `__version__`（バージョンの唯一の定義元）
 - `tests/test_natlean.py` — オフラインテスト（伝播ロジック）と `@api` テスト（実 API）
 - `examples/` — サンプル入力（正しい演繹・誤謬・過度な一般化）
+- `.github/workflows/ci.yml` — CI。Python 3.10〜3.14 でオフラインテスト、ビルドと `twine check`。main への push 時のみ `api` テスト（Secret `ANTHROPIC_API_KEY` が必要）
 
 ## パイプライン
 

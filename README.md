@@ -1,5 +1,7 @@
 # NatLean — 自然言語版 Lean
 
+[![CI](https://github.com/kkuramitsu/NatLean/actions/workflows/ci.yml/badge.svg)](https://github.com/kkuramitsu/NatLean/actions/workflows/ci.yml)
+
 NatLean は、自然言語で書かれた論証を **Lean のように1ステップずつ検証する** ツールです。
 
 自然言語では厳密な証明検査ができないため、各推論ステップの妥当性を軽量 LLM（Claude Haiku）で判定し、
@@ -20,7 +22,7 @@ Goal c3: NOT PROVED (conf=0.10)
 ## インストール
 
 ```bash
-pip install natlean
+pip install natlean          # Python 3.10 以上
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
