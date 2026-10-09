@@ -1,6 +1,6 @@
 """NatLean: 自然言語版 Lean — 自然言語の論証をステップごとに確率的にチェックする"""
 
-__version__ = "0.1.0"
+__version__ = "0.0.1"
 
 from .core import (  # noqa: E402
     DEFAULT_MODEL,
