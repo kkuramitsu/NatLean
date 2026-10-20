@@ -1,0 +1,234 @@
+% NatLean 論文草稿
+% ビルド: cd tex && latexmk
+\documentclass[a4paper,11pt]{ltjsarticle}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{pifont}
+
+\newcommand{\okmark}{\ding{51}}
+\newcommand{\ngmark}{\ding{55}}
+\usepackage[hidelinks]{hyperref}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  frame=single,
+  breaklines=true,
+  escapeinside={(*}{*)},
+}
+
+% 未記入の箇所
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+
+\title{NatLean: 軽量 LLM による自然言語論証の\\ステップ単位確率的検証}
+\author{倉光 君郎}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Lean などの証明支援系は、証明を1ステップずつ機械的に検査できるが、
+形式言語で書かれた証明しか扱えない。
+本稿では、自然言語で書かれた論証を Lean のようにステップ単位で検証するツール NatLean を提案する。
+NatLean は、文章を原子的な主張に分割し、主張間の依存関係と推論パターン（演繹・帰納・仮説形成など）を抽出したうえで、
+各推論ステップの妥当性を軽量 LLM（Claude Haiku）で複数回判定し、その平均を確率的な信頼度として扱う。
+信頼度は推論パターンごとの上限と前提の信頼度を掛け合わせて結論まで伝播させ、
+しきい値に満たないステップを Lean の \texttt{sorry} に相当する「根拠不足」として指摘する。
+\todo{評価結果の要約}
+\end{abstract}
+
+\section{はじめに}
+
+\todo{背景: 自然言語の論証（レポート、論文、議論）の妥当性を検査したいという動機}
+
+Lean~\cite{moura2021lean4} に代表される証明支援系は、証明の各ステップを型検査によって機械的に検証し、
+どこが証明されていないかを \texttt{sorry} として明示できる。
+一方、日常的な論証の大半は自然言語で書かれており、形式化のコストは高い。
+
+大規模言語モデル（LLM）は自然言語推論を一定の精度で行えるが、
+文章全体を一度に評価させると、どのステップに問題があるのかが分かりにくく、判定も不安定になりやすい。
+本研究では、Lean の「ステップごとの検査」という考え方を自然言語に持ち込み、
+各ステップの判定を確率として扱うことで、この問題に取り組む。
+
+本稿の貢献は次のとおりである。
+\begin{itemize}
+  \item 自然言語の論証を、主張・依存関係・推論パターンからなる構造に分解し、ステップ単位で検証する枠組みを示す。
+  \item 推論パターンごとに検証観点と信頼度の上限を与え、演繹と蓋然的推論（帰納・類推など）を区別して扱う。
+  \item 軽量 LLM の複数回判定と信頼度の伝播により、結論の確からしさと最も弱いステップを提示する。
+  \item 実装を OSS（Python パッケージ \texttt{natlean}）として公開する。
+\end{itemize}
+
+\section{関連研究}
+
+\paragraph{証明支援系}
+Lean~\cite{moura2021lean4} は依存型理論にもとづく証明支援系で、
+未証明の箇所を \texttt{sorry} として残したまま証明を書き進められる。
+NatLean はこの対話的な体験を自然言語の論証に移すことを目指す。
+
+\paragraph{論理推論データセット}
+FOLIO~\cite{han2022folio} は一階述語論理の注釈付きの自然言語推論データセット、
+EntailmentBank~\cite{dalvi2021entailmentbank} は前提から仮説への含意木を付与したデータセットである。
+これらは NatLean のステップ判定の評価・校正に利用できる。
+
+\paragraph{推論過程の検証}
+Lightman ら~\cite{lightman2023verify} は、推論の最終結果だけでなく各ステップを評価する
+プロセス監督の有効性を示した。
+ROSCOE~\cite{golovneva2023roscoe} は段階的推論の品質を評価する指標群を提案している。
+LLM を評価者として用いる手法~\cite{zheng2023judging} や、
+複数サンプルの多数決による自己整合性~\cite{wang2023selfconsistency} も、本研究の判定方法と関係が深い。
+
+\paragraph{論証理論}
+推論パターンごとに検証観点を変える考え方は、
+論証スキームと批判的質問~\cite{walton2008argumentation} に通じる。
+
+\section{NatLean}
+
+\subsection{Lean との対応}
+
+表~\ref{tab:lean} に Lean と NatLean の概念の対応を示す。
+
+\begin{table}[t]
+  \centering
+  \caption{Lean と NatLean の対応}
+  \label{tab:lean}
+  \begin{tabular}{ll}
+    \toprule
+    Lean & NatLean \\
+    \midrule
+    仮定 \texttt{h : P} & 前提（premise） \\
+    ゴール \texttt{$\vdash$ Q} & 結論（conclusion） \\
+    タクティク1ステップ & 主張間の推論1ステップ \\
+    型検査 OK / エラー & 確率スコア付き判定 \okmark{} / ? / \ngmark{} \\
+    \texttt{sorry} & 根拠不足のステップ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{処理の流れ}
+
+NatLean は次の4段階で論証を検証する。
+
+\paragraph{(1) 分割と構造解析}
+1回の LLM 呼び出しで、入力文章を原子的な主張 $c_1, c_2, \dots, c_n$ に分割する。
+各主張には、役割（premise / definition / inference / conclusion）、
+依存先 $D(c_i) \subseteq \{c_1, \dots, c_{i-1}\}$、
+推論パターン $\pi(c_i)$ を付与する。
+「ゆえに」などの接続語は主張の本文から除き、依存関係として表す。
+この段階では推論の妥当性は判断せず、書かれている構造をそのまま抽出する。
+出力は Pydantic のスキーマによる構造化出力として受け取る。
+
+\paragraph{(2) ステップ検証}
+依存先をもつ inference / conclusion をステップとみなし、
+依存先の主張を前提、$c_i$ を主張として LLM に提示する。
+前提はすべて真と仮定し、そこから主張が導けるかだけを判定させる。
+プロンプトには推論パターン別の検証観点（表~\ref{tab:pattern}）を含める。
+判定ラベルは valid / plausible / weak / invalid / contradicts の5段階とし、
+それぞれ $1.0, 0.75, 0.4, 0.1, 0.0$ の数値に写す。
+同じ判定を $k$ 回（既定は $k=3$）並列に行い、その平均をステップのスコア $s(c_i)$ とする。
+判定のばらつき（標準偏差）も記録し、最も低い評価の理由を代表として提示する。
+
+\paragraph{(3) 信頼度の伝播}
+主張 $c_i$ の信頼度を次式で定める。
+\begin{equation}
+  \mathrm{conf}(c_i) =
+  \begin{cases}
+    1 & \text{($c_i$ が前提・定義のとき)} \\
+    s(c_i) \cdot \mathrm{cap}(\pi(c_i)) \cdot \displaystyle\prod_{c_j \in D(c_i)} \mathrm{conf}(c_j) & \text{(それ以外)}
+  \end{cases}
+  \label{eq:conf}
+\end{equation}
+ここで $\mathrm{cap}(\pi)$ は推論パターンごとの信頼度の上限であり、
+演繹は必然的な推論として 1.0、帰納や類推は蓋然的な推論として低い値を与える（表~\ref{tab:pattern}）。
+主張は出現順に並んでおり依存先は必ず先行するため、式~\eqref{eq:conf} は先頭から1回走査するだけで計算できる。
+
+\paragraph{(4) 判定と出力}
+しきい値 $\theta$（既定 0.8）に対し、
+$\mathrm{conf} \geq \theta$ を \okmark{}、$0.5 \leq \mathrm{conf} < \theta$ を ?、それ未満を \ngmark{}（\texttt{sorry}）とする。
+結論が $\theta$ 以上なら PROVED、そうでなければ NOT PROVED とし、
+信頼度が最も低いステップを weakest link として示す。
+
+\begin{table}[t]
+  \centering
+  \caption{推論パターンごとの信頼度上限と検証観点}
+  \label{tab:pattern}
+  \small
+  \begin{tabular}{lcp{0.55\linewidth}}
+    \toprule
+    パターン & 上限 & 検証観点 \\
+    \midrule
+    deduction（演繹） & 1.0 & 前提が真なら結論は必ず真か。反例を構成できないか。形式的誤謬はないか。 \\
+    restatement（言い換え） & 1.0 & 意味が変わっていないか。強めたり弱めたりしていないか。 \\
+    example（例示） & 0.9 & 例は主張を正しく具体化しているか。 \\
+    induction（帰納） & 0.8 & 事例の数と代表性は十分か。過度な一般化ではないか。 \\
+    abduction（仮説形成） & 0.7 & 他にもっともらしい説明はないか。 \\
+    causal（因果） & 0.7 & 相関と因果を混同していないか。交絡や逆因果はないか。 \\
+    analogy（類推） & 0.6 & 類似点は本質的か。重要な相違点はないか。 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{実行例}
+
+後件肯定の誤謬を含む論証に対する出力例を示す。
+
+\begin{lstlisting}
+c1  [premise] 人はみな死ぬ    assumed
+c2  [premise] ソクラテスは死ぬ    assumed
+c3  [deduction] c1,c2 (*$\vdash$*) ソクラテスは人である    (*\ngmark*) 0.10  sorry
+      └ invalid/invalid/invalid: 後件肯定の形式的誤謬であり、
+        死ぬ別の存在(例:猫)を想定すれば反例が構成できる。
+
+Goal c3: NOT PROVED (conf=0.10)
+  weakest link: c3
+\end{lstlisting}
+
+\subsection{実装}
+
+NatLean は Python で実装し、LLM の呼び出しには Anthropic 公式 SDK を用いた。
+既定の判定モデルは Claude Haiku 5.5 であり、コマンドラインから上位モデルに切り替えられる。
+CLI の終了コードは、すべての結論がしきい値以上なら 0、そうでなければ 1 とし、
+CI に組み込んで文章の論証を継続的に検査できるようにした。
+
+\section{評価}
+
+\todo{評価設計。候補: FOLIO / EntailmentBank のステップ単位ラベルとの一致率、校正（ECE、信頼性図）、サンプル数 $k$ と判定の安定性、モデル間比較（Haiku vs.\ Sonnet）、コスト・レイテンシ}
+
+\subsection{データセット}
+\todo{}
+
+\subsection{結果}
+\todo{}
+
+\section{議論}
+
+\paragraph{前提の真偽}
+NatLean は前提をすべて仮定として受け入れ、推論の妥当性だけを検査する。
+これは Lean における仮定の扱いと同じであるが、実用上は前提の事実確認が求められる場面も多い。
+
+\paragraph{スコアの校正}
+ラベルの数値化や推論パターンの上限は経験的に定めた値であり、確率として校正されていない。
+正解ラベル付きデータによる校正は今後の課題である。
+
+\paragraph{独立性の仮定}
+式~\eqref{eq:conf} は前提の信頼度を掛け合わせており、前提間の独立性を暗に仮定している。
+同じ主張に複数の経路で依存する場合、信頼度を過小に見積もる可能性がある。
+
+\paragraph{構造解析の誤り}
+分割と依存関係の抽出自体も LLM に依存しており、ここでの誤りはステップ検証の結果に直接影響する。
+
+\section{おわりに}
+
+本稿では、自然言語の論証をステップ単位で確率的に検証するツール NatLean を提案した。
+今後は、前提の事実確認モード、正解ラベル付きデータによるスコアの校正、
+判定が不確かなステップのみを上位モデルで再判定する仕組み、
+判定結果のキャッシュによる増分チェックに取り組む。
+
+\bibliographystyle{junsrt}
+\bibliography{refs}
+
+\end{document}
