@@ -20,6 +20,7 @@ MESSAGES = {
     "weakest.leaf": {"ja": "前提 {id}", "en": "premise {id}"},
     "weakest.edge": {"ja": "推論 {id}", "en": "inference {id}"},
     "weakest.attack": {"ja": "攻撃 {id}（これが無ければ）", "en": "attack {id} (without it)"},
+    "readings": {"ja": "解釈 {term}:", "en": "readings of {term}:"},
     "legend": {"ja": "L=下限（依存を仮定しない） P̂=独立を仮定した推定 U=上限",
                "en": "L=lower bound (no independence assumed)  P̂=independent estimate  U=upper bound"},
     "backend": {"ja": "判定モデル: {name}", "en": "decision model: {name}"},
@@ -40,6 +41,19 @@ MESSAGES = {
                              "en": "{id}: the quote is not found in the input (extraction may have drifted)"},
     "warn.dangling": {"ja": "{id}: 存在しない命題・推論 {ref} を参照しているので無視した",
                       "en": "{id}: refers to unknown {ref}; ignored"},
+    "warn.reading_dependent": {
+        "ja": "{id}: 「{term}」の読み方で下限が変わる（{best} なら {best_lo:.2f}、{worst} なら {worst_lo:.2f}）",
+        "en": "{id}: the lower bound depends on how \"{term}\" is read ({best}: {best_lo:.2f}, {worst}: {worst_lo:.2f})"},
+    "warn.equivocation": {
+        "ja": "{id}: 「{term}」の読み替えで成り立って見える恐れ（多義の誤謬）。"
+              "{valid} と読めば推論は妥当（{valid_r:.2f}）だが前提が成り立たず（{valid_p:.2f}）、"
+              "{plaus} と読めば前提は成り立つ（{plaus_p:.2f}）が推論が妥当でない（{plaus_r:.2f}）",
+        "en": "{id}: the argument may only seem to hold by shifting the reading of \"{term}\" (equivocation). "
+              "Read as {valid}, the inference is valid ({valid_r:.2f}) but the premises fail ({valid_p:.2f}); "
+              "read as {plaus}, the premises hold ({plaus_p:.2f}) but the inference is not valid ({plaus_r:.2f})"},
+    "warn.readings_truncated": {
+        "ja": "解釈の組み合わせが多いため、確からしさの小さい割り当て（質量 {mass:.2f}）を打ち切った（下限は低く、上限は高くなる）",
+        "en": "too many combinations of readings; dropped the least likely ones (mass {mass:.2f}), which lowers L and raises U"},
     "warn.no_conclusion": {"ja": "結論が指定されていないため、最後の命題をゴールとした",
                            "en": "no conclusion was marked; the last proposition is used as the goal"},
     # --- CLI ---
@@ -56,6 +70,8 @@ MESSAGES = {
     "cli.model": {"ja": "抽出と claude バックエンドに使う Claude のモデル", "en": "Claude model for extraction and the claude backend"},
     "cli.threshold": {"ja": "「証明済み」とみなす下限のしきい値", "en": "lower-bound threshold for PROVED"},
     "cli.paraphrases": {"ja": "命題あたりの言い換え数", "en": "paraphrases per proposition"},
+    "cli.no_interpret": {"ja": "曖昧さ（量化・語義）の解釈の混合をしない", "en": "do not mix over readings of ambiguous terms"},
+    "cli.max_readings": {"ja": "評価する解釈の割り当ての数の上限", "en": "maximum number of reading assignments to evaluate"},
     "cli.log": {"ja": "判断ログ兼キャッシュの JSONL ファイル", "en": "JSONL file for the decision log and cache"},
     "cli.json": {"ja": "JSON で出力", "en": "output JSON"},
     "cli.error.backend": {"ja": "エラー: {name} の API キーが設定されていません（{env}）",
