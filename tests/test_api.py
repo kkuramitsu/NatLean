@@ -7,8 +7,9 @@ import os
 
 import pytest
 
-from natlean import (Argument, Attack, ClaudeBackend, Inference, JevBackend, NatLean, Prop,
+from natlean import (Argument, Attack, ClaudeBackend, EvidenceIndex, Inference, JevBackend, NatLean, Prop,
                      weakest_links)
+from natlean.estimate import estimate_prop
 
 SOCRATES = "人はみな死ぬ。ソクラテスは人である。ゆえに、ソクラテスは死ぬ。"
 FALLACY = "人はみな死ぬ。ソクラテスは死ぬ。ゆえに、ソクラテスは人である。"
@@ -102,3 +103,26 @@ def test_claude_backend_socrates():
 def test_claude_backend_fallacy():
     res = NatLean(ClaudeBackend(samples=3), lang="en").check(FALLACY)
     assert top(res).hi < 0.5
+
+
+# ---------- 根拠文書 ----------
+
+DOC = ("ソクラテスは古代ギリシャの哲学者である。紀元前399年に裁判で死刑の判決を受け、毒杯をあおいで死んだ。\n\n"
+       "プラトンはソクラテスの弟子であり、アカデメイアを創設した。")
+
+
+@jev_api
+def test_jev_evidence_supports_and_contradicts():
+    ix = EvidenceIndex({"socrates.txt": DOC})
+    model = JevBackend()
+    iv, cites, _ = estimate_prop(model, Prop("p1", "ソクラテスは毒杯をあおいで死んだ"), "ja", ix)
+    assert iv.est > 0.8 and cites and cites[0].relation == "supports"
+    iv, cites, _ = estimate_prop(model, Prop("p2", "ソクラテスは裁判で無罪になった"), "ja", ix)
+    assert iv.est < 0.3 and cites and cites[0].relation == "contradicts"
+
+
+@jev_api
+def test_jev_no_relevant_evidence_falls_back_with_warning():
+    ix = EvidenceIndex({"socrates.txt": DOC})
+    _, cites, warns = estimate_prop(JevBackend(), Prop("p1", "東京は日本の首都である"), "ja", ix)
+    assert not cites and [w.code for w in warns] == ["no_evidence"]
