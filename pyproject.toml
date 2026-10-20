@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "anthropic>=0.88",
+    "httpx>=0.27",
     "pydantic>=2",
 ]
 
@@ -48,4 +49,7 @@ include = ["src/natlean", "tests", "examples", "README.md", "LICENSE", "CLAUDE.m
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["api: Anthropic API を実際に呼ぶテスト（ANTHROPIC_API_KEY が必要）"]
+markers = [
+    "api: 実 API を呼ぶテスト（ANTHROPIC_API_KEY が必要。Jev も使うものは TYPESAFE_API_KEY が必要）",
+    "jev: Jev を実際に呼ぶテスト（TYPESAFE_API_KEY が必要）",
+]
