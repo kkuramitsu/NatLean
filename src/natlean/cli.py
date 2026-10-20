@@ -30,6 +30,8 @@ def build_parser(lang: str) -> argparse.ArgumentParser:
     ap.add_argument("--model", default=DEFAULT_MODEL, help=t("cli.model", lang))
     ap.add_argument("--threshold", type=float, default=0.8, help=t("cli.threshold", lang))
     ap.add_argument("--paraphrases", type=int, default=2, help=t("cli.paraphrases", lang))
+    ap.add_argument("--no-interpret", action="store_true", help=t("cli.no_interpret", lang))
+    ap.add_argument("--max-readings", type=int, default=16, help=t("cli.max_readings", lang))
     ap.add_argument("--log", help=t("cli.log", lang))
     ap.add_argument("--json", action="store_true", help=t("cli.json", lang))
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -59,7 +61,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 2
         decision = make_backend(args.backend, jev_model=args.jev_model, claude_model=args.model)
         res = NatLean(decision, mode=args.mode, extract_model=args.model, paraphrases=args.paraphrases,
-                      threshold=args.threshold, lang=lang, log=args.log).check(text)
+                      threshold=args.threshold, lang=lang, log=args.log,
+                      interpret=not args.no_interpret, max_readings=args.max_readings).check(text)
     except DecisionError as e:
         print(t("cli.error.generic", lang, msg=e), file=sys.stderr)
         return 2

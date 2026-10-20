@@ -23,7 +23,7 @@ def report(res: Result, lang: str = "") -> str:
     for e in arg.inferences:
         by_concl.setdefault(e.conclusion, []).append(e)
     for p in arg.props:
-        r = prop.props[p.id]
+        r = res.final(p.id) if p.id in res.goals else prop.props[p.id]
         es = by_concl.get(p.id, [])
         if not es:
             lines.append(f"{p.id:<4}[{p.kind}] {p.text}    {t('assumed', lang)}")
@@ -35,15 +35,18 @@ def report(res: Result, lang: str = "") -> str:
             premises = ", ".join(e.premises)
             lines.append(f"      {e.id}: {premises} ⊢ {e.conclusion}  [{e.pattern}]  "
                          f"r=[{e.r.lo:.2f}, {e.r.hi:.2f}]")
+    for a in arg.ambiguities:
+        senses = " / ".join(f"{s.label} {s.w:.2f}" for s in a.senses)
+        lines.append(f"{a.id:<4}{t('readings', lang, term=a.term)} {senses}")
     for i, a in enumerate(arg.attacks):
         lines.append(f"{attack_id(i):<4}{a.source} ⊣ {a.target}  [{a.kind}]  {a.strength.est:.2f}")
     for w in res.warnings:
         lines.append(f"  ! {_warn(w, lang)}")
     for g in res.goals:
-        r = prop.props[g]
+        r = res.final(g)
         lines.append("")
         lines.append(t("goal", lang, id=g, status=t(f"status.{status(r, res.threshold)}", lang), lo=r.lo))
-        if status(r, res.threshold) != "proved":
+        if status(r, res.threshold) != "proved" and not res.mixture:
             wl = weakest_links(arg, g)
             if wl:
                 lines.append("  " + t("weakest", lang))
@@ -68,8 +71,11 @@ def to_json(res: Result) -> dict:
         "backend": res.backend,
         "threshold": res.threshold,
         "ok": res.ok,
-        "goals": [{"id": g, "status": status(prop.props[g], res.threshold), **_result(prop.props[g])}
+        "goals": [{"id": g, "status": status(res.final(g), res.threshold), **_result(res.final(g))}
                   for g in res.goals],
+        "ambiguities": [asdict(a) for a in res.argument.ambiguities],
+        "readings": ({"evaluated": res.mixture.evaluated, "truncated": res.mixture.truncated,
+                      "marginals": res.mixture.marginals} if res.mixture else None),
         "props": [{**asdict(p), "result": _result(prop.props[p.id])} for p in res.argument.props],
         "inferences": [{**asdict(e), "result": asdict(prop.edges[e.id]) if e.id in prop.edges else None}
                        for e in res.argument.inferences],
