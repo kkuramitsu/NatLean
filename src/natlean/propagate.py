@@ -29,6 +29,7 @@ class PropResult:
     # 独立推定に使った葉の命題と推論の集合
     leaves: FrozenSet[str] = frozenset()
     edges: FrozenSet[str] = frozenset()
+    sources: FrozenSet[str] = frozenset()  # 使った葉の命題が引用した根拠の出どころ
 
 
 @dataclass
@@ -136,7 +137,7 @@ def propagate(arg: Argument, boost: Optional[Set[str]] = None, drop: Optional[Se
         if not sup:
             iv = Interval.point(1.0) if pid in boost else props[pid].p
             leaf_p[pid] = iv.est
-            res = PropResult(iv.lo, iv.est, iv.hi, leaves=frozenset([pid]))
+            res = PropResult(iv.lo, iv.est, iv.hi, leaves=frozenset([pid]), sources=props[pid].sources)
         else:
             res = _combine(pid, sup)
         for a in rebuts.get(pid, []):
@@ -172,7 +173,8 @@ def propagate(arg: Argument, boost: Optional[Set[str]] = None, drop: Optional[Se
         for x in edges_:
             est *= edge_val[x]
         er = EdgeResult(r_lo * q_lo, 1.0 - q_lo * (1.0 - r.hi), r_lo, r_est)
-        return er, PropResult(er.lo, est, er.hi, leaves=leaves, edges=edges_)
+        sources = frozenset().union(*(p.sources for p in prem))
+        return er, PropResult(er.lo, est, er.hi, leaves=leaves, edges=edges_, sources=sources)
 
     def _combine(pid: str, sup: list) -> PropResult:
         parts = []
@@ -183,20 +185,27 @@ def propagate(arg: Argument, boost: Optional[Set[str]] = None, drop: Optional[Se
         lo = max(p.lo for p in parts)
         hi = min(p.hi for p in parts)
         keys = [p.leaves | p.edges for p in parts]
-        disjoint = all(not (keys[i] & keys[j]) for i in range(len(keys)) for j in range(i))
+        pairs = [(i, j) for i in range(len(parts)) for j in range(i)]
+        shared = {s for i, j in pairs for s in parts[i].sources & parts[j].sources}
+        overlap = any(keys[i] & keys[j] for i, j in pairs)
         if len(parts) == 1:
             best = parts[0]
-            return PropResult(lo, best.est, hi, leaves=best.leaves, edges=best.edges)
-        if disjoint:
+            return PropResult(lo, best.est, hi, leaves=best.leaves, edges=best.edges, sources=best.sources)
+        if not overlap and not shared:
             miss = 1.0
             for p in parts:
                 miss *= 1.0 - p.est
             return PropResult(lo, 1.0 - miss, hi,
                               leaves=frozenset().union(*(p.leaves for p in parts)),
-                              edges=frozenset().union(*(p.edges for p in parts)))
+                              edges=frozenset().union(*(p.edges for p in parts)),
+                              sources=frozenset().union(*(p.sources for p in parts)))
         best = max(parts, key=lambda p: p.est)
-        out.warnings.append(Warn("double_count", {"id": pid}))
-        return PropResult(lo, best.est, hi, double_count=True, leaves=best.leaves, edges=best.edges)
+        if overlap:
+            out.warnings.append(Warn("double_count", {"id": pid}))
+        if shared:  # 同じ出どころの根拠を独立とみなすと過大評価になる
+            out.warnings.append(Warn("shared_source", {"id": pid, "source": ", ".join(sorted(shared))}))
+        return PropResult(lo, best.est, hi, double_count=True, leaves=best.leaves, edges=best.edges,
+                          sources=best.sources)
 
     for p in arg.props:
         value(p.id)
