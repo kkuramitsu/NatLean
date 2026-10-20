@@ -165,19 +165,57 @@ DAG で同じ前提が複数経路から効くときに二重に掛けないよ�
 複数の推論が $C$ を支えるときは、$S_V$ と根拠文書の出どころが互いに素なら noisy-OR
 $1-\prod_e(1-\hat P_e)$、重なるなら $\max$ をとり「二重計上の恐れ」を警告する。
 
-\subsection{解釈の扱い}
+\subsection{解釈の扱い}\label{sec:reading}
 
-曖昧と判定された命題 $s$ ごとに解釈候補 $I_{s,1},\dots,I_{s,K}$ と確からしさ $w_{s,k}$ を持つ。
-解釈は $p_s$ と、$s$ を前提とする推論の $r$ の\textbf{両方}を変えるので、
-解釈の割り当て $\sigma$（各曖昧文に1つの解釈）ごとにグラフ全体を評価し、混合する。
+\paragraph{曖昧さのグループ。}
+抽出が見つけた曖昧さを $a$ とし、$a$ は語（または文）$t_a$、影響を受ける命題の集合 $S_a$、
+解釈候補（意味）$k=1,\dots,K_a$ を持つ。意味 $k$ は、$S_a$ の各命題 $s$ について書き換えた文 $I_{a,k,s}$ を与える。
+\begin{itemize}
+  \item 量化の曖昧さ：$S_a=\{s\}$、候補は全称・総称・存在など（「鳥は飛ぶ」）。
+  \item 語義の曖昧さ：$S_a$ は同じ語を使う複数の命題、候補は語義（「何もない」を否定の量化と読むか、無と読むか）。
+\end{itemize}
+意味の確からしさ $w_{a,k}$ は、Jev の Choice に語 $t_a$ と $S_a$ の文だけを入れて得る。
+
+\paragraph{混合。}
+解釈は $p_s$ と、$s$ を前提とする推論の $r$ の\textbf{両方}を変える。
+割り当て $\sigma$（各 $a$ に1つの意味）ごとに、影響を受ける命題を書き換え、
+影響を受ける $p$・$r$・攻撃の強さだけを再推定して（キャッシュが効く）グラフ全体を評価し、混合する。
 \begin{equation}
-  L(C) = \sum_\sigma w(\sigma)\, L_\sigma(C),\qquad w(\sigma)=\prod_s w_{s,\sigma(s)}
+  L(C) = \sum_{\sigma\in\Sigma} w(\sigma)\, L_\sigma(C),\qquad
+  U(C) = \sum_{\sigma\in\Sigma} w(\sigma)\, U_\sigma(C) + m,\qquad
+  w(\sigma)=\prod_a w_{a,\sigma(a)}
 \end{equation}
-$P(C\mid\sigma)\ge L_\sigma(C)$ なので、全確率の公式により $L(C)$ も健全な下限になる。
-割り当ては文書全体で一貫させる（同じ文を段階ごとに別の意味で読まない）。
-組み合わせ数が上限 $K_{\max}$（既定 16）を超える場合は、$w$ の小さい解釈を
-「最悪の解釈」に寄せて保守的に近似する。
-$\max_\sigma L_\sigma - \min_\sigma L_\sigma$ が大きい命題には「解釈依存」の警告を出す。
+$\Sigma$ は $w(\sigma)$ の大きい順に高々 $K_{\max}$ 個（既定 16）を残した集合、
+$m = 1-\sum_{\sigma\in\Sigma}w(\sigma)$ は打ち切った割り当ての質量である。
+$P(C\mid\sigma)\ge L_\sigma(C)\ge 0$ と $P(C\mid\sigma)\le 1$ から、全確率の公式により
+$L$ と $U$ は健全で、打ち切りは下限を下げ上限を上げる側（保守的）にだけ働く。
+独立推定値も同様に混合し、打ち切った分は 0 とする。
+assume モードでは前提を真と置くので、解釈は主に $r$ に効く。estimate モードでは $p$ にも効く。
+
+\paragraph{解釈依存の警告。}
+意味 $k$ を固定したときの条件付き下限を
+\begin{equation}
+  L_{a,k}=\frac{\sum_{\sigma:\sigma(a)=k} w(\sigma)L_\sigma}{\sum_{\sigma:\sigma(a)=k} w(\sigma)}
+\end{equation}
+とし、$w_{a,k}\ge 0.1$ の意味の間で $\max_k L_{a,k}-\min_k L_{a,k} > 0.3$ なら
+「$t_a$ の読み方で結論の下限が変わる」と警告する。
+
+\paragraph{多義の誤謬。}
+意味 $k$ を固定したときの割り当てごとに、下限を\textbf{推論の妥当性}と\textbf{前提の妥当性}に分ける。
+\begin{itemize}
+  \item $R_{a,k}$：葉の前提をすべて確実（$p=1$）としたときの結論の下限。推論が妥当かどうか。
+  \item $P_{a,k}$：推論をすべて確実（$r=1$）とし攻撃を除いたときの結論の下限。前提が成り立つかどうか。
+\end{itemize}
+いずれも $\sigma(a)=k$ の割り当てについて $w(\sigma)$ で平均した値である。
+意味 $v=\arg\max_k R_{a,k}$ と $q=\arg\max_k P_{a,k}$ が異なり、
+\begin{equation}
+  R_{a,v}-R_{a,q} > 0.3 \quad\text{かつ}\quad P_{a,q}-P_{a,v} > 0.3
+\end{equation}
+のとき、「$v$ と読めば推論は妥当だが前提が成り立たず、$q$ と読めば前提は成り立つが推論が妥当でない」ので、
+語 $t_a$ の読み替えで論証が成り立って見えているだけだと警告する（多義の誤謬）。
+量化の曖昧さなら、全称と読めば妥当だが前提が偽、総称と読めば前提は真だが推論は弱い、という
+\textbf{全称と総称の取り違え}がこの条件に当たる。
+assume モードでは前提を真と置くので $P_{a,k}=1$ となり、この警告は出ない（estimate モードでのみ動く）。
 
 \subsection{閉路}
 
@@ -433,7 +471,7 @@ Goal C1: NOT PROVED (L=0.18)
   \item \textbf{v0.2.0（実装済み）}：グラフ、伝播（区間、攻撃、閉路、最弱環）、日英の出力、
         Jev・Claude・Fake のバックエンド、区間化、ログとキャッシュ、\texttt{assume} と \texttt{estimate} モード
         （根拠文書なし）、引用の照合。
-  \item 解釈の混合と多義の誤謬の検出
+  \item \textbf{段階2（実装済み）}：解釈の混合（§\ref{sec:reading}）と多義の誤謬の検出。
   \item 根拠文書（\texttt{--evidence}）と二重計上の検出
   \item 較正（等張回帰）と \texttt{--escalate}
 \end{enumerate}
