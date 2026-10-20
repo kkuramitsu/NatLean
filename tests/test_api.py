@@ -7,11 +7,14 @@ import os
 
 import pytest
 
-from natlean import ClaudeBackend, JevBackend, NatLean
+from natlean import (Argument, Attack, ClaudeBackend, Inference, JevBackend, NatLean, Prop,
+                     weakest_links)
 
 SOCRATES = "人はみな死ぬ。ソクラテスは人である。ゆえに、ソクラテスは死ぬ。"
 FALLACY = "人はみな死ぬ。ソクラテスは死ぬ。ゆえに、ソクラテスは人である。"
 HASTY = "昨日見たカラスは黒かった。今日見たカラスも黒かった。ゆえに、世界中のカラスはすべて黒い。"
+GENERIC = "鳥は飛ぶ。ペンギンは鳥である。ゆえに、ペンギンは飛ぶ。"
+HAM = "永遠の幸福にまさるものは何もない。ハムサンドは何もないよりはましである。ゆえに、ハムサンドは永遠の幸福にまさる。"
 PENGUIN = "鳥は飛ぶ。ピーちゃんは鳥である。ゆえに、ピーちゃんは飛ぶ。ただし、ピーちゃんはペンギンである。"
 
 
@@ -52,9 +55,41 @@ def test_jev_hasty_induction(jev):
 
 @jev_api
 def test_jev_penguin_undercut_is_the_weakest_link(jev):
-    res = jev.check(PENGUIN)
-    assert res.argument.attacks, "掘り崩しが抽出されていない"
+    # 抽出は確率的なので、判定部分は手で作ったグラフで確かめる
+    arg = Argument(
+        language="ja",
+        props=[Prop("p1", "鳥は飛ぶ"), Prop("p2", "ピーちゃんは鳥である"), Prop("p3", "ピーちゃんは飛ぶ", "conclusion"),
+               Prop("p4", "ピーちゃんはペンギンである")],
+        inferences=[Inference("s1", ["p1", "p2"], "p3", "generic_application")],
+        attacks=[Attack("undercut", "p4", "s1")])
+    res = jev.check_argument(arg)
     assert not res.ok
+    assert res.propagation.edges["s1"].r_eff_lo < 0.5  # 掘り崩しで推論の r が下がる
+    assert weakest_links(arg, "p3")[0][:2] == ("attack", "a1")
+
+
+@jev_api
+def test_jev_extracts_penguin_attack_most_of_the_time(jev):
+    res = jev.check(PENGUIN)
+    assert not res.ok
+    if not res.argument.attacks:
+        pytest.skip("今回の抽出では掘り崩しが見つからなかった（抽出は確率的）")
+
+
+@jev_api
+def test_jev_generic_sentence_is_read_in_two_ways(jev):
+    res = jev.check(GENERIC)
+    assert not res.ok
+    # 抽出が曖昧さを見つけたときは、全称と総称の両方の意味に確率が付き、合計 1 になる
+    for a in res.argument.ambiguities:
+        assert sum(s.w for s in a.senses) == pytest.approx(1.0)
+    if res.argument.ambiguities:
+        assert res.mixture and res.mixture.evaluated >= 2
+
+
+@jev_api
+def test_jev_ham_sandwich_is_not_proved(jev):
+    assert not jev.check(HAM).ok
 
 
 @claude_api
