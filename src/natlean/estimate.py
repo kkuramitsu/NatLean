@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Dict, Tuple
 
 from .decision import Choice, DecisionModel, Noul, Question
-from .graph import PATTERNS, STRICT_PATTERNS, Argument, Attack, Inference, Interval, Prop
+from .graph import STRICT_PATTERNS, Ambiguity, Argument, Attack, Inference, Interval, Prop
 
 # 問いのテンプレート（入力の言語で選ぶ）
 Q = {
@@ -22,6 +22,7 @@ Q = {
         "pattern": "premises から conclusion を導く推論は、どの型か。",
         "rebut": "source が真だとして、target は偽か。",
         "undercut": "source が真なら、premises から conclusion を導くこの推論は適用できなくなるか。",
+        "sense": "この文脈で、term はどの意味で使われているか。",
     },
     "en": {
         "true": "Is this statement true?",
@@ -32,6 +33,7 @@ Q = {
         "pattern": "What type of inference leads from the premises to the conclusion?",
         "rebut": "Assuming source is true, is target false?",
         "undercut": "If source is true, does the inference from the premises to the conclusion cease to apply?",
+        "sense": "In this context, in which sense is the term used?",
     },
 }
 
@@ -110,3 +112,15 @@ def estimate_attack(model: DecisionModel, arg: Argument, a: Attack, lang: str) -
     e = arg.inference(a.target)
     state = {"source": arg.prop(a.source).text, **_inference_state(arg, e, arg.prop(e.conclusion).text)}
     return Interval.point(_noul(model, state, q["undercut"]))
+
+
+def estimate_senses(model: DecisionModel, arg: Argument, a: Ambiguity, lang: str) -> None:
+    """曖昧さ a の各意味の確からしさ w を求めて a.senses[*].w に書く（合計 1 に正規化）
+
+    state には語と、影響を受ける命題の原文だけを入れる。"""
+    state = {"term": a.term, "sentences": [arg.prop(q).text for q in a.props]}
+    probs = model.ask(state, {"q": Choice(Q[lang]["sense"],
+                                          {s.label: s.description or s.label for s in a.senses})})["q"]
+    total = sum(probs.get(s.label, 0.0) for s in a.senses)
+    for s in a.senses:
+        s.w = probs.get(s.label, 0.0) / total if total > 0 else 1.0 / len(a.senses)
