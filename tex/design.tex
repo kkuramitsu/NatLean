@@ -1,0 +1,450 @@
+% NatLean v0.2 設計書
+% ビルド: cd tex && latexmk -lualatex design.tex
+\documentclass[a4paper,11pt]{ltjsarticle}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{pifont}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\okmark}{\ding{51}}
+\newcommand{\ngmark}{\ding{55}}
+\newcommand{\fix}[1]{\textcolor{blue!60!black}{\textbf{[修正]} #1}}
+\newcommand{\add}[1]{\textcolor{green!40!black}{\textbf{[追加]} #1}}
+\newcommand{\tbd}[1]{\textcolor{red!70!black}{\textbf{[未確定]} #1}}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  frame=single,
+  breaklines=true,
+}
+
+\title{NatLean v0.2 設計書\\\large 自然言語の確率的論理チェッカー}
+\author{倉光 君郎}
+\date{2026年10月20日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+%======================================================================
+\section{目的と方針}
+
+NatLean は、自然言語で書かれた論証を Lean のようにステップ単位で検査し、
+結論が論証によって\textbf{どれだけ支えられているか}を確率の区間として示すツールである。
+v0.0.1 は「ラベル平均 × パターン上限 × 依存先の積」という発見的な計算だったが、
+v0.2 では次の方針で作り直す。
+
+\begin{enumerate}
+  \item 推論の確かさ $r$ を条件付き確率 $P(C \mid P_1 \wedge \cdots \wedge P_n)$ として定義し、
+        確率論理として健全な\textbf{下限}を主な出力にする。
+  \item 論証を一本の鎖ではなく、命題をノード、推論をハイパーエッジとする\textbf{論証グラフ}として扱う。
+        反駁（rebut）と掘り崩し（undercut）を区別する。
+  \item 文を命題に変換する段階の不確かさ（\textbf{解釈}）を明示的に扱う。
+  \item 数値（$p_i$、$r$、解釈の確からしさ）は決定モデル（Jev）で推定し、
+        モデルの非整合性を\textbf{区間の幅}に変換する。計算そのものは普通のコードで行う。
+  \item 表示メッセージは日本語と英語に対応する。
+\end{enumerate}
+
+%======================================================================
+\section{提案設計のチェック結果}
+
+提示された設計案を検証した結果を表~\ref{tab:review} にまとめる。
+大筋は妥当であり、修正が必要なのは主に「上限」「長い鎖」「解釈と事実の確かさの結合」の3点である。
+
+\begin{table}[htbp]
+\centering
+\caption{設計案の検証結果}\label{tab:review}
+\small
+\begin{tabularx}{\linewidth}{lcX}
+\toprule
+項目 & 判定 & コメント \\
+\midrule
+$r = P(C\mid \bigwedge P_i)$ の定義 & \okmark & 妥当。ただし $r$ は「論証に書かれた情報＋常識」のもとでの値であることを明記する（§\ref{sec:semantics}）。\\
+下限 $r\cdot\max(0,1-\sum(1-p_i))$ & \okmark & Fréchet 下限。依存関係を仮定しないので、共有された祖先があっても健全。\\
+独立仮定 $r\cdot\prod p_i$ & \okmark & ただし DAG で同じ前提が2経路から効くと二重に掛かる。葉と辺の集合で数える（§\ref{sec:indep}）。\\
+ソクラテスの例 $0.989$ & \okmark & 計算は正しい。\\
+上限は役に立たない & \ngmark & \fix{上限 $1-q(1-r)$ は $q$ が大きく $r$ が小さいとき、すなわち誤謬の検出で有用。反駁も上限を与える。}\\
+5段階で下限 0.5 & \ngmark & \fix{一本鎖なら各段で $P(C_k)\ge r_k P(C_{k-1})$ を順に適用でき、$0.9^5\approx0.59$。0.5 になるのは5つの前提を一度に連言する場合。結論（区間と最弱環を示す）は変わらない。}\\
+解釈の混合 $\sum_k P(I_k)P(C\mid I_k)$ & $\triangle$ & 全確率の公式として正しい。\fix{ただし解釈は $r$ だけでなく $p_i$ も変える（「鳥は飛ぶ」は全称なら $r=1, p\approx0$、総称なら $r<1, p\approx1$）。$p$ と $r$ を同じ解釈のもとで同時に評価しないと過大評価になる。}\\
+複数根拠のベイズ更新 & $\triangle$ & \fix{事前確率と根拠の条件付き独立が必要で、どちらも手に入らない。健全側は各根拠の区間の共通部分（下限は max）。独立側だけ noisy-OR を使い、出どころが重なる場合は使わない。}\\
+反駁と掘り崩し & \okmark & 計算式を §\ref{sec:attack} で与える。\\
+パターン別の $r$ & \okmark & 規則表と Jev の併用（§\ref{sec:pattern}）。\\
+Jev Noul/Choice の割り当て & \okmark & 実在を確認。ただし公式の既知制約に\textbf{否定・複合条件}が含まれる。\fix{否定プローブは平均に混ぜず、非整合の検出に使う。$r$ の問いでは前提を連言文にせず、state の別フィールドに入れる。}\\
+state の最小化 & \okmark & \add{抽出段階（生成 LLM）は全文を読むので、そこで修辞が混入しうる。原文の引用位置をコードで照合し、忠実性を確認する。}\\
+知識と判断の分離 & \okmark & \add{根拠なしモードも用意する（$p$ を仮定する／モデルの事前知識で推定する）。}\\
+較正 & \okmark & 等張回帰。$p$ だけでなく $r$ と解釈についても行う。\\
+\midrule
+循環論法 & \add{} & 論証グラフの閉路として検出する（設計案に無い）。\\
+多義の誤謬 & \add{} & 同じ語を段階ごとに違う意味で使う誤り。解釈を文書全体で一貫させて検出する。\\
+抽出の誤り & \add{} & 抽出が論証構造を取り違えると全体が無意味になる。抽出の確かさも報告する。\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+%======================================================================
+\section{形式モデル}
+
+\subsection{論証グラフ}
+
+論証は $G=(V,E,A)$ で表す。
+\begin{itemize}
+  \item $V$：命題ノード。原文の引用位置、正規化した文、種別（事実・定義・仮定・中間・結論）、解釈候補を持つ。
+  \item $E$：推論ハイパーエッジ $e = (\{P_1,\dots,P_n\} \to C,\ \pi_e,\ r_e)$。
+        $\pi_e$ は推論パターン、$r_e=[r_e^-, r_e^+]$ は区間。
+  \item $A$：攻撃。反駁 $a\colon u \dashv C$（命題 $u$ が $C$ を否定する）と、
+        掘り崩し $a\colon u \dashv e$（$u$ が推論 $e$ の適用を無効にする）の2種。
+\end{itemize}
+トゥールミンの論証モデルとは、主張＝$C$、根拠＝$P_i$、論拠＝$\pi_e$、裏付け＝根拠文書、
+限定語＝区間、反駁＝$A$ と対応する。
+
+\subsection{確率の意味}\label{sec:semantics}
+
+すべての確率は、ひとつの（未知の）確率測度 $P$ のもとでの値とみなす。
+$p_i$ は命題の確からしさ（根拠文書 $D$ があれば $P(P_i\mid D)$）、
+$r_e$ は「論証に明示された前提と常識のもとで、前提がすべて真なら結論が真である確率」である。
+各推定値は $P$ に対する\textbf{制約}として働き、矛盾する制約（区間の共通部分が空）は非整合の警告になる。
+
+\subsection{評価モード}
+
+\begin{description}
+  \item[\texttt{assume}（既定）] 葉の前提を $p=1$ とおく。Lean の仮定と同じく、論証の\textbf{妥当性}だけを測る。
+  \item[\texttt{estimate}] 葉の前提の $p$ を決定モデルで推定する。根拠文書があれば $P(P_i\mid D)$ とする。
+\end{description}
+
+%======================================================================
+\section{伝播計算}
+
+ここは決定モデルを使わず、純粋な関数として実装する（オフラインで完全にテストできる）。
+
+\subsection{1本の推論の区間}
+
+前提の下限 $L_i$ から、前提の連言の下限を Fréchet 不等式で求める。
+\begin{equation}
+  q^- = \max\Bigl(0,\ 1 - \sum_{i=1}^n (1 - L_i)\Bigr)
+\end{equation}
+$P(C) = r\,q + P(C\mid\neg\wedge P)(1-q)$ で、第2項の条件付き確率は $[0,1]$ のどこでもありうるから、
+\begin{equation}
+  L_e = r_e^- \cdot q^-, \qquad U_e = 1 - q^-\,(1 - r_e^+).
+\end{equation}
+$U_e$ は $q$ について減少するので $q^-$ を使う。
+例：後件肯定で $r^+=0.3$、$q^-=0.95$ なら $U_e = 0.335$ となり、
+「この前提だけでは結論は支えられない」ことを上限で示せる。
+
+\subsection{複数の根拠と攻撃}\label{sec:attack}
+
+結論 $C$ を支える推論が複数あるとき、健全側では各区間の共通部分をとる。
+\begin{equation}
+  L(C) = \max_e L_e,\qquad U(C) = \min\Bigl(\min_e U_e,\ 1 - L(\neg C)\Bigr)
+\end{equation}
+ここで $L(\neg C)$ は反駁 $u \dashv C$ から得られる $\neg C$ の下限である
+（反駁は推論 $u \to \neg C$ として同じ計算で扱う）。
+$L(C) > U(C)$ になったら\textbf{衝突}として警告し、両方の値を表示する。
+
+掘り崩し $u \dashv e$ について、$r_e$ は「掘り崩しが無いとき」の値と定義する。
+$u$ が成り立ち、かつ $e$ に効く確率の上限を $d^+ = U(u)\cdot a_u^+$
+（$a_u$ は「$u$ が成り立てば $e$ は適用できなくなるか」の確率）とすると、
+\begin{equation}
+  r_e^{\text{eff},-} = r_e^- \,(1 - d^+).
+\end{equation}
+ペンギンの例：「鳥は飛ぶ（総称）」「ピーちゃんは鳥」$\Rightarrow$「ピーちゃんは飛ぶ」で $r=0.9$、
+掘り崩し「ピーちゃんはペンギン」が $U=1$、$a=0.99$ なら $r^{\text{eff},-}=0.009$。
+
+\subsection{独立仮定の推定値}\label{sec:indep}
+
+独立仮定の値は、下限とは別の「楽観的な点推定」として出す。
+DAG で同じ前提が複数経路から効くときに二重に掛けないよう、
+各ノードについて\textbf{支持部分グラフ}（使った葉の集合 $S_V$ と辺の集合 $S_E$）を持ち回る。
+\begin{equation}
+  \hat P(C) = \prod_{e\in S_E(C)} \hat r_e \prod_{v\in S_V(C)} \hat p_v
+\end{equation}
+複数の推論が $C$ を支えるときは、$S_V$ と根拠文書の出どころが互いに素なら noisy-OR
+$1-\prod_e(1-\hat P_e)$、重なるなら $\max$ をとり「二重計上の恐れ」を警告する。
+
+\subsection{解釈の扱い}
+
+曖昧と判定された命題 $s$ ごとに解釈候補 $I_{s,1},\dots,I_{s,K}$ と確からしさ $w_{s,k}$ を持つ。
+解釈は $p_s$ と、$s$ を前提とする推論の $r$ の\textbf{両方}を変えるので、
+解釈の割り当て $\sigma$（各曖昧文に1つの解釈）ごとにグラフ全体を評価し、混合する。
+\begin{equation}
+  L(C) = \sum_\sigma w(\sigma)\, L_\sigma(C),\qquad w(\sigma)=\prod_s w_{s,\sigma(s)}
+\end{equation}
+$P(C\mid\sigma)\ge L_\sigma(C)$ なので、全確率の公式により $L(C)$ も健全な下限になる。
+割り当ては文書全体で一貫させる（同じ文を段階ごとに別の意味で読まない）。
+組み合わせ数が上限 $K_{\max}$（既定 16）を超える場合は、$w$ の小さい解釈を
+「最悪の解釈」に寄せて保守的に近似する。
+$\max_\sigma L_\sigma - \min_\sigma L_\sigma$ が大きい命題には「解釈依存」の警告を出す。
+
+\subsection{閉路}
+
+強連結成分を求め、閉路上の推論は支持に使わない（その推論の $L_e=0$）。
+閉路が結論の支持に関わっていれば「循環論法」を警告する。
+閉路を除いたあとはトポロジカル順に計算する（v0.0.1 の「出現順」前提は廃止）。
+
+\subsection{最も弱い環}
+
+各葉の $L_v$ と各推論の $r_e^-$ について、それを 1 に置き換えたときのゴールの下限の増分
+$\Delta_x = L(C)\big|_{x=1} - L(C)$ を求め、大きい順に上位3件を示す。
+伝播は線形時間なので、全要素について再計算しても安い。
+
+%======================================================================
+\section{数値の推定}
+
+\subsection{決定モデルの抽象化}
+
+決定モデルはバックエンドを差し替えられるようにする。
+\begin{lstlisting}[language=Python]
+class DecisionModel(Protocol):
+    name: str      # 設定上の名前（キャッシュの鍵）
+    version: str   # 応答が返した実体のバージョン（判断ログに残す）
+    def ask(self, state, questions: dict[str, Noul | Choice]) \
+        -> dict[str, float | dict[str, float]]: ...
+\end{lstlisting}
+Jev の API に合わせ、同じ state への名前付きの質問群を1回でまとめて投げる。
+
+\begin{description}
+  \item[\texttt{JevBackend}] TypeSafe Jev の Noul と Choice（§\ref{sec:jevspec}）。
+        環境変数 \texttt{TYPESAFE\_API\_KEY} から鍵を読み、HTTP を直接呼ぶ薄いアダプタに閉じ込める
+        （SDK は早期アクセス中で互換性が壊れやすいので使わない）。
+        既定は \texttt{jev-latest}、\texttt{--jev-model jev-preview} で切り替える。
+        この2つは別名なので、応答の \texttt{model} に返る実体のバージョン（例 \texttt{jev-1.13.0}）を
+        すべての判断ログとキャッシュの鍵に記録する。
+  \item[\texttt{ClaudeBackend}] Claude Haiku（\texttt{claude-haiku-5-5}）に
+        \texttt{messages.parse} で yes/no や選択肢を $k$ 回答えさせ、頻度を確率とする。
+        Jev の鍵が無い環境での代替と、比較実験用。
+  \item[\texttt{FakeBackend}] 固定値を返す。オフラインテスト用。
+\end{description}
+
+\subsection{Jev の API と実験結果}\label{sec:jevspec}
+
+公式の OpenAPI 仕様と、2026年10月20日の実験（\texttt{scratchpad/jev\_probe.py}）で確定した内容。
+
+\paragraph{API。}
+\texttt{POST https://api.typesafe.ai/v1/systemone} に \texttt{\{model, state, questions\}} を送る。
+\texttt{state} は文字列またはオブジェクトで、\textbf{1リクエスト内のすべての質問に共通}。
+\texttt{questions} は名前付きの辞書で、\texttt{noul}（\texttt{instructions}、\texttt{criteria.true/false}）、
+\texttt{choice}（\texttt{criteria}：選択肢名$\to$説明、255個まで）、\texttt{score}、\texttt{box} がある。
+応答は \texttt{\{model, answers, usage\}}。\texttt{noul} は $[0,1]$ の確率、\texttt{choice} は選択肢ごとの確率と確信度を返す。
+入力トークンのみ課金で、出力は無料。1リクエストは約400トークン。
+
+\paragraph{使えるモデル。}
+鍵で選べるのは別名の \texttt{jev-latest}（実体 \texttt{jev-1.13.0}）と \texttt{jev-preview}（実体 \texttt{jev-1.14.0}）のみ。
+バージョンを直接指定して固定することはできない。
+
+\paragraph{実験結果（\texttt{jev-latest}）。}
+\begin{itemize}
+  \item 再現性：同じ問いを5回で $0.55$〜$0.57$。確率的な揺れは小さい。
+  \item 真偽 $p$：「ソクラテスは死ぬ」$0.91$、「月はチーズでできている」$0.02$、未来の気温 $0.18$。方向は正しい。
+  \item 総称と全称：「すべての鳥は飛ぶ」$0.04$、「鳥は飛ぶ」$0.56$。Choice による分類は「鳥は飛ぶ」を総称と $0.95$ で判定した。
+  \item 推論 $r$：妥当な演繹 $0.97$、後件肯定 $0.06$、過度な帰納 $0.03$、総称の個体への適用 $0.94$、
+        部分クラスへの推論 $0.63$。
+  \item 否定プローブ：「ソクラテスは死ぬ」$0.91$ に対し否定の補数 $0.79$。
+        「鳥は飛ぶ」の言い換え「たいていの鳥は飛ぶ」は $0.83$（原文 $0.56$）。
+  \item 2系統の問い（成り立つか／反例はありうるか）：部分クラス推論で $0.63$ と $0.44$ とずれた。
+  \item 誘導：説得的な修辞を付けた偽の文の全文を入れても $0.02$ のままだった（1例のみ）。
+  \item \texttt{jev-preview} は \texttt{jev-latest} とほぼ同じ傾向で、否定の補数だけ $0.66$ とやや大きくずれた。
+\end{itemize}
+
+\paragraph{設計への反映。}
+(1) 同じ問いの繰り返しは行わない。(2) 総称文は真偽の質問に向かないので、解釈の分類を先に行う。
+(3) $p$ と解釈は同じ state への質問として1リクエストにまとめる。
+(4) 区間の幅は言い換え・否定・2系統の問いのずれから作る。
+
+\subsection{非整合を区間に変える}
+
+命題 $s$ について、次のプローブを投げる。
+\begin{itemize}
+  \item 原文 $s$ と、抽出時に生成した言い換え $s'_1,\dots,s'_m$（既定 $m=3$）への Noul。
+  \item 否定 $\neg s$ への Noul の補数 $1-\mathrm{Noul}(\neg s)$。
+        否定は「『$s$』というのは誤りである」という\textbf{機械的な包み方}で作る
+        （「すべての鳥が飛ぶ」の否定を「どの鳥も飛ばない」と誤る問題を避ける）。
+\end{itemize}
+同じ問いの繰り返しは行わない（§\ref{sec:jevspec}：再現性が高く、平均しても情報が増えない）。
+区間は問いの違い（言い換え・否定・2系統の問い）だけから作る。
+較正写像 $f$ を通した値の最小・平均・最大を $[p^-, \hat p, p^+]$ とする。
+Jev は否定を苦手とすると公表されているので、否定プローブが言い換えプローブ群から
+$\tau$（既定 0.2）以上離れた場合は区間に含めたうえで「否定で判断が揺れる」と記録する。
+区間の幅 $p^+-p^-$ が $\tau$ を超えた命題は「モデルの判断が一貫しない」として警告し、
+\texttt{--escalate} 指定時は上位モデルで再判定する。
+
+$r$ にも同じ方法を使う。問いは「前提がすべて真なら結論は真か」と
+「前提がすべて真で結論が偽となる状況はありうるか」（補数をとる）の2系統とし、
+それぞれ言い換えを含める。
+
+\subsection{state の最小化（誘導対策）}
+
+論証文は読み手を説得するために書かれているので、全文を決定モデルに見せない。
+\begin{itemize}
+  \item $p$ の推定：正規化した命題1文（と根拠文書）だけを入れる。
+  \item $r$ の推定：前提と結論を、修辞を剥いだ形で別フィールドに入れる。
+        前提を「AかつBかつC」の1文にしない（複合条件は Jev の既知の弱点）。
+  \item 解釈の判定：その文と、問題の語だけを入れる。
+\end{itemize}
+抽出は生成 LLM が全文を読んで行うので、抽出結果の各命題に原文の引用を付けさせ、
+引用が原文に実在するかを\textbf{コードで}照合する。照合できない命題は警告する。
+
+\subsection{推論パターンと $r$ の決め方}\label{sec:pattern}
+
+パターンは Jev の Choice で分類し、抽出 LLM の推定と食い違えば警告する。
+\begin{table}[htbp]
+\centering\small
+\begin{tabularx}{\linewidth}{lX}
+\toprule
+パターン & $r$ の決め方 \\
+\midrule
+モーダス・ポネンス、全称例化、三段論法 & 形式が確認できれば $r=1$（反例プローブで確認）\\
+言い換え & 意味が保たれているかの Noul \\
+総称文の個体への適用 & Noul。掘り崩し（個体についての追加情報）を必ず探す \\
+クラスから部分クラスへ & Noul。ただし\textbf{常に警告}（部分クラスが小さいと保証はゼロ）\\
+帰納的一般化 & Noul。事例数・代表性を state に入れる。全称への一般化は警告 \\
+仮説形成・類推・因果・権威 & Noul（Hahn \& Oaksford 流に程度問題として評価）\\
+形式的誤謬（後件肯定・前件否定など） & Noul で $r$ を推定し、誤謬名を警告に出す \\
+\bottomrule
+\end{tabularx}
+\end{table}
+パターンを追加するときは、列挙型・規則表・問いのテンプレート・抽出プロンプトの4か所をそろえる。
+
+\subsection{較正}
+
+較正写像 $f$ は（バックエンドのバージョン, 問いの種類）ごとに等張回帰で作り、JSON で保存する。
+既定は恒等写像。データは $r$ に FOLIO と EntailmentBank、$p$ に真偽ラベル付きの命題集合を使う。
+較正曲線と ECE を出すスクリプトを \texttt{scripts/} に置く。
+
+\subsection{ログとキャッシュ}
+
+すべての問いを（バックエンドのバージョン, 問い, state のハッシュ）をキーに JSONL へ記録し、
+同じキーはキャッシュから返す。これで判断の再現と増分チェックができる。
+
+%======================================================================
+\section{パイプライン}
+
+\begin{enumerate}
+  \item \textbf{抽出}（Claude Haiku、1回）：命題（引用・正規化文・種別・言い換え・曖昧さの候補）、
+        推論（前提・結論・パターンの推定）、攻撃（反駁・掘り崩し）、入力の言語。
+  \item \textbf{照合}（コード）：引用の実在、id の参照、閉路。
+  \item \textbf{解釈}（Choice）：曖昧な命題の解釈の確からしさ $w_{s,k}$。
+  \item \textbf{パターン分類}（Choice）。
+  \item \textbf{推定}（Noul）：$p$（\texttt{estimate} モード時）、$r$、掘り崩しの適用度 $a_u$。解釈ごと。
+  \item \textbf{伝播}（コード）：区間、独立推定、最弱環、警告。
+  \item \textbf{振り分け}：非整合・低確信の箇所を上位モデル（\texttt{--escalate}）または人間に回す。
+  \item \textbf{出力}：テキスト（Lean 風）または JSON。
+\end{enumerate}
+
+%======================================================================
+\section{出力と多言語対応}
+
+\subsection{判定}
+
+ゴールの判定はしきい値 $\theta$（既定 0.8）で決める。
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+記号 & 条件 & 意味 \\
+\midrule
+\okmark & $L \ge \theta$ & 証明された（PROVED） \\
+? & $L < \theta \le \hat P$ & 独立を仮定すれば成り立つ（PLAUSIBLE） \\
+\ngmark & $\hat P < \theta$ & 根拠不足（NOT PROVED、\texttt{sorry}） \\
+\bottomrule
+\end{tabular}
+\end{center}
+終了コードは、すべてのゴールが \okmark なら 0、そうでなければ 1、エラーは 2。
+
+\subsection{テキスト出力の例}
+
+\begin{lstlisting}
+P1  人はみな死ぬ                    assumed
+P2  ソクラテスは人である            assumed
+S1  P1, P2 |- C1   [全称例化] r=[1.00, 1.00]
+C1  ソクラテスは死ぬ                OK  L=1.00  P^=1.00  U=1.00
+
+Goal C1: PROVED (L=1.00)
+\end{lstlisting}
+
+\begin{lstlisting}
+S1  P1, P2 |- C1   [後件肯定] r=[0.18, 0.35]
+C1  ソクラテスは人である            NG  L=0.18  P^=0.27  U=0.35  sorry
+  ! 形式的誤謬: 後件肯定
+Goal C1: NOT PROVED (L=0.18)
+  weakest link: S1 (+0.82)
+\end{lstlisting}
+
+\subsection{多言語対応}
+
+\begin{itemize}
+  \item 表示言語は \texttt{--lang \{ja,en\}} で選ぶ。未指定なら環境変数 \texttt{NATLEAN\_LANG}、
+        次に \texttt{LANG} が \texttt{ja} で始まれば日本語、それ以外は英語。
+  \item CLI のヘルプ、判定語、警告、レポートの見出しは \texttt{natlean/i18n.py} のメッセージカタログ
+        （キー → \{ja, en\}）から引く。argparse のヘルプも言語に従うよう、
+        \texttt{--lang} を先に読んでからパーサを組み立てる。
+  \item 抽出 LLM が出す正規化文と言い換えは\textbf{入力の言語}で書かせる（言い換えの意味を保つため）。
+  \item 決定モデルへの問いのテンプレートは ja/en の両方を用意し、入力の言語で選ぶ。
+        \tbd{Jev の日本語での精度は未確認。英語の問いに日本語の命題を入れる構成と比較する。}
+  \item JSON 出力のキーは英語に固定し、言語に依存させない。
+  \item コード中のコメントと docstring は従来どおり日本語。CLAUDE.md の
+        「プロンプト・CLI のメッセージは日本語」の規約は改める。
+\end{itemize}
+
+%======================================================================
+\section{実装構成}
+
+\begin{center}\small
+\begin{tabular}{ll}
+\toprule
+ファイル & 内容 \\
+\midrule
+\texttt{natlean/graph.py} & 論証グラフのデータ型（Pydantic） \\
+\texttt{natlean/extract.py} & 抽出（Claude）と引用照合 \\
+\texttt{natlean/decision/} & \texttt{DecisionModel} と Jev・Claude・Fake のバックエンド \\
+\texttt{natlean/estimate.py} & プローブ生成、区間化、較正、ログとキャッシュ \\
+\texttt{natlean/propagate.py} & 区間伝播・攻撃・解釈の混合・閉路・最弱環（純関数） \\
+\texttt{natlean/report.py} & テキストと JSON の出力 \\
+\texttt{natlean/i18n.py} & メッセージカタログ \\
+\texttt{natlean/cli.py} & \texttt{natlean} コマンド \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+主な CLI オプション：
+\begin{itemize}\small
+  \item \texttt{--lang \{ja,en\}}, \texttt{--mode \{assume,estimate\}}, \texttt{--backend \{jev,claude\}}
+  \item \texttt{--threshold}, \texttt{--paraphrases}, \texttt{--escalate}
+  \item \texttt{--evidence FILE}, \texttt{--json}, \texttt{--log FILE}
+\end{itemize}
+
+\subsection{テスト}
+
+\begin{itemize}
+  \item オフライン（\texttt{propagate}）：ソクラテス $0.989$、Fréchet の 0 への切り詰め、一本鎖 $0.9^5$、
+        共有祖先で独立推定が二重に掛からないこと、反駁による上限と衝突、ペンギンの掘り崩し、
+        解釈の混合（全称と総称）、閉路の検出、最弱環の順位。
+  \item オフライン（\texttt{estimate}）：\texttt{FakeBackend} で区間化・否定プローブの扱い・キャッシュ。
+  \item オフライン（\texttt{i18n}）：全キーに ja と en があること、両言語でレポートが組めること。
+  \item \texttt{@api}：例題3件（演繹・後件肯定・過度な一般化）とペンギンの例で、判定の向きが正しいこと。
+        Jev のテストは \texttt{@jev} として別のマーカーにする。
+\end{itemize}
+
+\subsection{実装の段階}
+
+\begin{enumerate}
+  \item \textbf{v0.2.0（実装済み）}：グラフ、伝播（区間、攻撃、閉路、最弱環）、日英の出力、
+        Jev・Claude・Fake のバックエンド、区間化、ログとキャッシュ、\texttt{assume} と \texttt{estimate} モード
+        （根拠文書なし）、引用の照合。
+  \item 解釈の混合と多義の誤謬の検出
+  \item 根拠文書（\texttt{--evidence}）と二重計上の検出
+  \item 較正（等張回帰）と \texttt{--escalate}
+\end{enumerate}
+
+\section{未確定事項}
+
+\begin{enumerate}
+  \item Jev の日本語と英語の精度比較（問いのテンプレートを日英どちらで書くか）。
+  \item Jev の誘導耐性は1例のみ。複数の修辞パターンで確認する。
+  \item \texttt{estimate} モードでの根拠文書の取得方法（ユーザー指定ファイルか、検索か）。
+  \item 較正用の $p$ のデータセットの選定。
+\end{enumerate}
+
+\end{document}
