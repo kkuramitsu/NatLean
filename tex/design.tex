@@ -352,6 +352,33 @@ $r$ にも同じ方法を使う。問いは「前提がすべて真なら結論�
 既定は恒等写像。データは $r$ に FOLIO と EntailmentBank、$p$ に真偽ラベル付きの命題集合を使う。
 較正曲線と ECE を出すスクリプトを \texttt{scripts/} に置く。
 
+\subsection{根拠文書}\label{sec:evidence}
+
+知識と判断を分ける。根拠文書はユーザーが指定したファイル（\texttt{--evidence FILE}、複数可）から取り、
+\textbf{1ファイルを1つの出どころ}として扱う。検索による取得は行わない（取得方法は差し替え可能にしておく）。
+
+\paragraph{検索。}
+文書を段落・文の区切りで $600$ 字程度の passage に分け、命題の文字 2-gram のうち passage に現れる割合で
+順位を付け、上位 $3$ 件（スコア $0.2$ 以上）を使う。埋め込みは使わない（日英どちらでも動かすため）。
+
+\paragraph{推定。}
+葉の命題 $s$ と、検索で得た passage $d_j$ の組ごとに、同じ state（命題と passage）への2つの質問を1回で投げる。
+\begin{itemize}
+  \item Choice：$d_j$ は $s$ を裏付ける・否定する・無関係のどれか。
+  \item Noul：$d_j$ を根拠として $s$ は真か。さらに $s$ を機械的に否定した文についても同じ Noul を投げ、補数をとる。
+\end{itemize}
+無関係でない passage の値の最小・平均・最大を $[p^-,\hat p,p^+]$ とする。
+裏付けと否定が混在すれば区間が広がり、「根拠が食い違う」と警告する。
+無関係でない passage が無ければ、根拠なしの推定（モデルの事前知識）に戻し、「根拠なし」と警告する。
+各命題には、引用した出どころ・passage の番号・関係・値を記録し、レポートに示す。
+
+\paragraph{二重計上の検出。}
+命題 $v$ の出どころの集合 $\mathrm{src}(v)$ を、引用した出どころ（関係が無関係でないもの）とする。
+結論を支える複数の推論 $e_1,e_2$ について、それぞれが使った葉の出どころの和集合 $\mathrm{src}(e_i)$ が
+共通部分を持つとき、これらを独立とみなして noisy-OR をとると、同じ情報源の根拠を二重に数えて
+過大評価になる。共通する出どころがあれば $\max$ をとり、共有した出どころ名を示して警告する
+（葉や推論そのものが重なる場合の警告とは別に出す）。
+
 \subsection{ログとキャッシュ}
 
 すべての問いを（バックエンドのバージョン, 問い, state のハッシュ）をキーに JSONL へ記録し、
@@ -450,7 +477,8 @@ Goal C1: NOT PROVED (L=0.18)
 \begin{itemize}\small
   \item \texttt{--lang \{ja,en\}}, \texttt{--mode \{assume,estimate\}}, \texttt{--backend \{jev,claude\}}
   \item \texttt{--threshold}, \texttt{--paraphrases}, \texttt{--escalate}
-  \item \texttt{--evidence FILE}, \texttt{--json}, \texttt{--log FILE}
+  \item \texttt{--evidence FILE}（複数可。指定すると \texttt{--mode} の既定が \texttt{estimate} になる）
+  \item \texttt{--json}, \texttt{--log FILE}
 \end{itemize}
 
 \subsection{テスト}
@@ -472,7 +500,7 @@ Goal C1: NOT PROVED (L=0.18)
         Jev・Claude・Fake のバックエンド、区間化、ログとキャッシュ、\texttt{assume} と \texttt{estimate} モード
         （根拠文書なし）、引用の照合。
   \item \textbf{段階2（実装済み）}：解釈の混合（§\ref{sec:reading}）と多義の誤謬の検出。
-  \item 根拠文書（\texttt{--evidence}）と二重計上の検出
+  \item \textbf{段階3（実装済み）}：根拠文書（\texttt{--evidence}、§\ref{sec:evidence}）と、同じ出どころの根拠の二重計上の検出。
   \item 較正（等張回帰）と \texttt{--escalate}
 \end{enumerate}
 
@@ -481,7 +509,7 @@ Goal C1: NOT PROVED (L=0.18)
 \begin{enumerate}
   \item Jev の日本語と英語の精度比較（問いのテンプレートを日英どちらで書くか）。
   \item Jev の誘導耐性は1例のみ。複数の修辞パターンで確認する。
-  \item \texttt{estimate} モードでの根拠文書の取得方法（ユーザー指定ファイルか、検索か）。
+  \item 根拠文書の検索を差し替え可能にするかどうか（現状は文字 2-gram の重なりのみ）。
   \item 較正用の $p$ のデータセットの選定。
 \end{enumerate}
 
