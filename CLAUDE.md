@@ -9,6 +9,7 @@ NatLean は「自然言語版 Lean」。自然言語の論証を命題と推論�
 - `src/natlean/decision/` — 決定モデル。`jev.py`（TypeSafe Jev）、`claude.py`、`fake.py`（テスト用）、`cache.py`（判断ログ兼キャッシュ）
 - `src/natlean/estimate.py` — 問いの組み立てと区間化。日英の問いのテンプレートと推論パターンの説明
 - `src/natlean/propagate.py` — 伝播計算。**純関数で、決定モデルを使わない**
+- `src/natlean/interpret.py` — 曖昧さの意味の割り当てごとに評価して混合し、読み方への依存と多義の誤謬（R と P のトレードオフ）を警告する
 - `src/natlean/checker.py` — `NatLean` クラス（抽出 → 推定 → 伝播）
 - `src/natlean/report.py` — テキストと JSON の出力
 - `src/natlean/i18n.py` — 表示メッセージの日英カタログ
@@ -24,7 +25,8 @@ NatLean は「自然言語版 Lean」。自然言語の論証を命題と推論�
 1. `extract` — Claude が命題（引用・正規化文・言い換え）・推論（前提→結論、パターン）・攻撃（反駁・掘り崩し）を抽出。引用が原文に無ければ警告
 2. `NatLean.estimate` — 決定モデルで r（と必要なら p、攻撃の強さ）を区間として推定。パターンも分類して食い違いを警告
 3. `propagate` — 下限は Fréchet（`r.lo × max(0, 1 − Σ(1 − lo))`）、上限は `1 − q.lo × (1 − r.hi)`、独立推定は葉と推論を一度ずつ掛ける。閉路上の推論は使わない
-4. `report` — Lean 風のテキスト（`--json` で JSON）
+4. `interpret.mix` — 曖昧さがあれば、意味の割り当てごとに書き換えて評価し混合（打ち切った質量は下限 0・上限 1 として保守的に扱う）
+5. `report` — Lean 風のテキスト（`--json` で JSON）。曖昧さがあるとゴールの値は混合後（`Result.final`）
 
 ## コマンド
 
@@ -52,7 +54,7 @@ cd tex && latexmk -lualatex design.tex
 
 ## 今後の課題
 
-- 解釈の混合（全称と総称。p と r の両方が解釈で変わるので、割り当てごとにグラフ全体を評価して混ぜる）と、多義の誤謬の検出
+- 曖昧さの抽出の揺れ（同じ入力でも見つかったり見つからなかったりする）の抑え方。曖昧さがあるときの最弱環の計算
 - 根拠文書の取得（`estimate` モードで P(命題 | 根拠) にする）と、同じ出どころの根拠の二重計上の検出
 - 正解ラベル付きデータ（FOLIO、EntailmentBank など）による較正（等張回帰）
 - 区間の幅が大きい箇所だけ上位モデルで再判定（`--escalate`）

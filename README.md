@@ -39,6 +39,7 @@ echo "…" | natlean -                    # 標準入力から
 natlean essay.txt --lang en             # 英語で表示（既定は NATLEAN_LANG、LANG の順に判定）
 natlean essay.txt --mode estimate       # 前提の確かさも推定する（既定の assume は前提を真と置く）
 natlean essay.txt --backend claude      # 判定を Claude で行う
+natlean essay.txt --no-interpret       # 曖昧さの解釈の混合をしない
 natlean essay.txt --threshold 0.7       # 「証明済み」とみなす下限のしきい値
 natlean essay.txt --log decisions.jsonl # 判断ログ兼キャッシュ
 natlean essay.txt --json                # JSON で出力
@@ -69,7 +70,11 @@ print(res.ok, res.propagation.props[res.goals[0]])
    決定モデルには論証の全文を見せず、前提と結論だけを渡す（説得力ではなく論理的な支持を測るため）。
 3. **伝播**（コードのみ）: 下限は `r.lo × max(0, 1 − Σ(1 − 前提の下限))`、上限は `1 − q.lo × (1 − r.hi)`。
    掘り崩しは r を下げ、反駁は上限を下げる。閉路上の推論は使わない。
-4. **判定**: `L ≥ threshold` で ✓、独立なら成立（`P̂ ≥ threshold`）で ?、それ未満は ✗（sorry）。
+4. **解釈の混合**: 「鳥は飛ぶ」（全称か総称か）や、途中で意味が変わる語のような曖昧さは、意味ごとに命題を書き換えて
+   グラフ全体を評価し、意味の確からしさで混合する。読み方で結論の下限が変わるときと、
+   「全称と読めば推論は妥当だが前提が偽、総称と読めば前提は真だが推論が弱い」のように
+   読み替えで成り立って見えるとき（多義の誤謬。`--mode estimate` のみ）は警告する。
+5. **判定**: `L ≥ threshold` で ✓、独立なら成立（`P̂ ≥ threshold`）で ?、それ未満は ✗（sorry）。
 
 設計の詳細は [`tex/design.tex`](tex/design.tex) にあります。
 
@@ -77,7 +82,7 @@ print(res.ok, res.propagation.props[res.goals[0]])
 
 - `assume` モードでは前提の真偽は検証しません（すべて仮定として受け入れます）。
 - 確率は決定モデルの出力で、まだ校正（calibration）していません。
-- 「鳥は飛ぶ」のような総称文は全称とは別の解釈を持ちますが、解釈の混合はまだ実装していません。
+- 曖昧さの抽出は LLM によるため、実行ごとに見つかったり見つからなかったりします（多義の誤謬は特に揺れます）。
 - Jev は早期アクセスで、`jev-latest` の中身が変わりえます。応答のバージョンを判断ログ（`--log`）に残します。
 
 ## 開発
