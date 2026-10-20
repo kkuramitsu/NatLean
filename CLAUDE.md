@@ -6,6 +6,8 @@ NatLean は「自然言語版 Lean」。自然言語の論証を命題と推論�
 
 - `src/natlean/graph.py` — データ型（`Prop` / `Inference` / `Attack` / `Argument` / `Interval` / `Warn`）
 - `src/natlean/extract.py` — 論証の抽出（Claude 1回、`messages.parse`）と、引用・参照のコードによる検証
+- `src/natlean/pipeline.py` — 抽出の段（`Draft` を受けて返す `Stage`）。`OneShotClaude` が従来の1回抽出。`NatLean(stages=[...])` で差し替え、`run_stages` が最後に検証する
+- `src/natlean/stages.py` — 段の部品。`Segment`（文に分割、コードのみ）・`Normalize`（Claude で正規化と言い換え）・`Link`（決定モデルで支持・反駁・掘り崩し・パターン・kind を判定。向きは「ゆえに」「なぜなら」の手がかり `Draft.cues` で決める）
 - `src/natlean/decision/` — 決定モデル。`jev.py`（TypeSafe Jev）、`claude.py`、`fake.py`（テスト用）、`cache.py`（判断ログ兼キャッシュ）
 - `src/natlean/estimate.py` — 問いの組み立てと区間化。日英の問いのテンプレートと推論パターンの説明
 - `src/natlean/propagate.py` — 伝播計算。**純関数で、決定モデルを使わない**
@@ -23,7 +25,7 @@ NatLean は「自然言語版 Lean」。自然言語の論証を命題と推論�
 
 ## パイプライン
 
-1. `extract` — Claude が命題（引用・正規化文・言い換え）・推論（前提→結論、パターン）・攻撃（反駁・掘り崩し）を抽出。引用が原文に無ければ警告
+1. `extract`（`pipeline.run_stages`。既定は `OneShotClaude` 1段）— Claude が命題（引用・正規化文・言い換え）・推論（前提→結論、パターン）・攻撃（反駁・掘り崩し）を抽出。引用が原文に無ければ警告
 2. `NatLean.estimate` — 決定モデルで r（と必要なら p、攻撃の強さ）を区間として推定。パターンも分類して食い違いを警告。根拠文書があれば葉の p を P(命題 | passage) にし、引用（`Prop.cites`）を残す
 3. `propagate` — 下限は Fréchet（`r.lo × max(0, 1 − Σ(1 − lo))`）、上限は `1 − q.lo × (1 − r.hi)`、独立推定は葉と推論を一度ずつ掛ける。複数の支持が葉・推論・根拠の出どころを共有すれば独立とみなさず max をとる。閉路上の推論は使わない
 4. `interpret.mix` — 曖昧さがあれば、意味の割り当てごとに書き換えて評価し混合（打ち切った質量は下限 0・上限 1 として保守的に扱う）
