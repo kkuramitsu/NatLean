@@ -38,6 +38,7 @@ natlean examples/deduction.txt          # ファイルを検証
 echo "…" | natlean -                    # 標準入力から
 natlean essay.txt --lang en             # 英語で表示（既定は NATLEAN_LANG、LANG の順に判定）
 natlean essay.txt --mode estimate       # 前提の確かさも推定する（既定の assume は前提を真と置く）
+natlean essay.txt --evidence docs/        # 根拠文書（ファイルまたはディレクトリ、複数可）で前提の確かさを推定
 natlean essay.txt --backend claude      # 判定を Claude で行う
 natlean essay.txt --no-interpret       # 曖昧さの解釈の混合をしない
 natlean essay.txt --threshold 0.7       # 「証明済み」とみなす下限のしきい値
@@ -74,7 +75,10 @@ print(res.ok, res.propagation.props[res.goals[0]])
    グラフ全体を評価し、意味の確からしさで混合する。読み方で結論の下限が変わるときと、
    「全称と読めば推論は妥当だが前提が偽、総称と読めば前提は真だが推論が弱い」のように
    読み替えで成り立って見えるとき（多義の誤謬。`--mode estimate` のみ）は警告する。
-5. **判定**: `L ≥ threshold` で ✓、独立なら成立（`P̂ ≥ threshold`）で ?、それ未満は ✗（sorry）。
+5. **根拠文書**（`--evidence`）: 前提を根拠文書の該当箇所（passage）に照らして `P(前提 | 根拠)` として推定し、
+   どの出どころ（ファイル）の何番目の passage に基づくかをレポートに示す。同じ出どころに基づく複数の根拠は独立とみなさず、
+   二重計上を警告する。
+6. **判定**: `L ≥ threshold` で ✓、独立なら成立（`P̂ ≥ threshold`）で ?、それ未満は ✗（sorry）。
 
 設計の詳細は [`tex/design.tex`](tex/design.tex) にあります。
 
@@ -82,6 +86,8 @@ print(res.ok, res.propagation.props[res.goals[0]])
 
 - `assume` モードでは前提の真偽は検証しません（すべて仮定として受け入れます）。
 - 確率は決定モデルの出力で、まだ校正（calibration）していません。
+- 根拠文書の検索は文字 2-gram の重なりだけで、意味的な検索ではありません。常識的な前提は、関連の薄い passage に
+  引きずられて根拠なしの推定より低くなることがあります。
 - 曖昧さの抽出は LLM によるため、実行ごとに見つかったり見つからなかったりします（多義の誤謬は特に揺れます）。
 - Jev は早期アクセスで、`jev-latest` の中身が変わりえます。応答のバージョンを判断ログ（`--log`）に残します。
 
