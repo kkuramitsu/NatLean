@@ -204,6 +204,36 @@ arg = Argument(
 print(propagate(arg).props["p3"].lo)   # 0.989
 ```
 
+### 抽出の段を組み替える（実験的）
+
+既定の抽出は、Claude が1回で命題・推論・攻撃・曖昧さをすべて出します（`OneShotClaude`）。
+これを段に分けて、`NatLean(stages=[...])` で組み替えられます。各段は `Draft` を受けて `Draft` を返し、
+最後に引用・参照をコードが検証します（`CLI` からは未対応です）。
+
+| 段 | 担当 | 動作 |
+|---|---|---|
+| `OneShotClaude(model)` | Claude | 従来の一括抽出（既定。曖昧さの抽出もここだけ） |
+| `Segment()` | コード | 句点・改行で文に分け、接続語（ゆえに・なぜなら・therefore）を取り除いて手がかりとして残す |
+| `Normalize(model, paraphrases=2)` | Claude | 命題ごとに中立な1文（`text`）と言い換えを作る。原文全体は文脈としてだけ渡す |
+| `Link(decision, window=None)` | 決定モデル | 命題の組ごとに支持・反駁を判定して推論・攻撃・`kind` を作り、掘り崩しとパターンも判定する |
+
+```python
+from natlean import NatLean, JevBackend, Segment, Normalize, Link
+
+jev = JevBackend()
+nl = NatLean(jev, stages=[Segment(), Normalize(), Link(jev)])   # 文の書き直しは Claude、辺の判定は Jev
+res = nl.check("人はみな死ぬ。ソクラテスは人である。ゆえに、ソクラテスは死ぬ。")
+
+nl = NatLean(jev, stages=[Segment(), Link(jev)])                # 生成を使わない構成（ANTHROPIC_API_KEY 不要）
+```
+
+- 推論の向きは、接続語があればそれで決めます。「ゆえに」の文は前の文から導かれる結論、「なぜなら」の文は
+  直前の文の理由です。接続語が無い文章は内容だけで向きを決めるため、取り違えることがあります。
+- `Link` は組ごとに問うので、命題が n 個なら n(n−1) 回の判定になります。`window=2` のように範囲を絞れます。
+- `Segment` と `Link` だけなら Anthropic の API キーは要りません（`Normalize` を使うときは要ります）。
+- 曖昧さの抽出と解釈の混合は、段の構成では働きません（`OneShotClaude` のみ）。
+- 段の部品は自作できます。`Draft` を受けて `Draft` を返す呼び出し可能なものなら、リストに入れられます。
+
 ## 仕組み
 
 | Lean | NatLean |
@@ -236,6 +266,7 @@ print(propagate(arg).props["p3"].lo)   # 0.989
 - 確率は決定モデルの出力で、まだ校正（calibration）していません。
 - 根拠文書の検索は文字 2-gram の重なりだけで、意味的な検索ではありません。常識的な前提は、関連の薄い passage に
   引きずられて根拠なしの推定より低くなることがあります。
+- 段に分けた抽出（上）は実験的です。接続語の無い文章では推論の向きを取り違えることがあり、曖昧さは検出されません。
 - 曖昧さの抽出は LLM によるため、実行ごとに見つかったり見つからなかったりします（多義の誤謬は特に揺れます）。
 - Jev は早期アクセスで、`jev-latest` の中身が変わりえます。応答のバージョンを判断ログ（`--log`）に残します。
 
