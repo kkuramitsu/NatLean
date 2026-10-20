@@ -118,7 +118,7 @@ def ext(**kw):
     base = dict(language="ja", props=props,
                 inferences=[ExtInference(id="s1", premises=["p1", "p9"], conclusion="p3", pattern="deduction"),
                             ExtInference(id="s2", premises=["p1", "p2"], conclusion="p3", pattern="deduction")],
-                attacks=[ExtAttack(kind="undercut", source="p2", target="s9")])
+                attacks=[ExtAttack(kind="undercut", source="p2", target="s9")], ambiguities=[])
     base.update(kw)
     return ExtArgument(**base)
 
