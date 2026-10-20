@@ -47,7 +47,7 @@ jobs:
           path: dist/
 
   # 実 API を呼ぶテスト（課金あり）。main への push と手動実行のときだけ動かす。
-  # リポジトリの Secrets に ANTHROPIC_API_KEY が無ければテストはスキップされる。
+  # リポジトリの Secrets に ANTHROPIC_API_KEY（Jev のテストは TYPESAFE_API_KEY も）が無ければテストはスキップされる。
   api:
     if: github.event_name != 'pull_request'
     needs: test
@@ -62,4 +62,5 @@ jobs:
       - name: API テスト
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: pytest -v -rs -m api
