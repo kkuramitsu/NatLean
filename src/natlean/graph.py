@@ -82,11 +82,36 @@ class Attack:
 
 
 @dataclass
+class Sense:
+    """曖昧さの1つの意味。readings は 命題 id → その意味で書き換えた文。w は意味の確からしさ"""
+    label: str
+    description: str = ""
+    readings: Dict[str, str] = field(default_factory=dict)
+    w: float = 0.0
+
+
+@dataclass
+class Ambiguity:
+    """曖昧な語・文。kind は quantifier（量化）/ word_sense（語義）/ other。
+    senses のうち、文書全体で1つが選ばれる（同じ語を途中で読み替えない）と考える"""
+    id: str
+    kind: str
+    term: str
+    senses: List[Sense] = field(default_factory=list)
+
+    @property
+    def props(self) -> List[str]:
+        """この曖昧さが影響する命題 id"""
+        return sorted({q for s in self.senses for q in s.readings})
+
+
+@dataclass
 class Argument:
     language: str = "ja"
     props: List[Prop] = field(default_factory=list)
     inferences: List[Inference] = field(default_factory=list)
     attacks: List[Attack] = field(default_factory=list)
+    ambiguities: List[Ambiguity] = field(default_factory=list)
     warnings: List[Warn] = field(default_factory=list)
 
     def prop(self, pid: str) -> Prop:

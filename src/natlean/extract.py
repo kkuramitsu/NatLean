@@ -10,9 +10,11 @@ from typing import List, Literal, Optional
 import anthropic
 from pydantic import BaseModel
 
-from .graph import PATTERNS, Argument, Attack, Inference, Prop, Warn
+from .graph import Ambiguity, Argument, Attack, Inference, Prop, Sense, Warn
 
 DEFAULT_MODEL = "claude-haiku-5-5"
+MAX_AMBIGUITIES = 4
+MAX_SENSES = 3
 
 ExtKind = Literal["premise", "definition", "assumption", "intermediate", "conclusion"]
 ExtPattern = Literal[
@@ -42,11 +44,29 @@ class ExtAttack(BaseModel):
     target: str
 
 
+class ExtReading(BaseModel):
+    prop: str
+    text: str
+
+
+class ExtSense(BaseModel):
+    label: str
+    description: str
+    readings: List[ExtReading]
+
+
+class ExtAmbiguity(BaseModel):
+    kind: Literal["quantifier", "word_sense", "other"]
+    term: str
+    senses: List[ExtSense]
+
+
 class ExtArgument(BaseModel):
     language: Literal["ja", "en"]
     props: List[ExtProp]
     inferences: List[ExtInference]
     attacks: List[ExtAttack]
+    ambiguities: List[ExtAmbiguity]
 
 
 EXTRACT_SYSTEM = """あなたは論証の構造解析器です。与えられた文章から、論証グラフを抽出してください。
@@ -74,7 +94,16 @@ inferences（推論）:
 attacks（攻撃。無ければ空）:
 - rebut: source の命題が target の命題を直接否定する。
 - undercut: source の命題が、target の推論 id の適用を無効にする（例外の指摘など）。
-  攻撃元 source は props に含まれる命題でなければならない。"""
+  攻撃元 source は props に含まれる命題でなければならない。
+
+ambiguities（曖昧さ。論証の成否に関わるものだけ。無ければ空。最大4件）:
+- kind: quantifier（量化の曖昧さ。「鳥は飛ぶ」が全称か総称か）/
+  word_sense（同じ語が複数の意味で使えるために、論証が成り立つかどうかが変わる）/ other
+- term: 曖昧な語または文。
+- senses: 2〜3個の意味。label は短い名前、description はその意味の説明。
+  readings は、その意味で読んだときの命題の書き換え（prop は命題 id、text はその意味で書き直した中立な1文）。
+  量化なら、曖昧な命題1つに対する書き換え。語義なら、その語を使うすべての命題の書き換えを、すべての意味について揃える。
+- 1つの命題を複数の ambiguity に含めてはいけない。明らかに曖昧でないものは含めない。"""
 
 
 def _norm(s: str) -> str:
@@ -108,6 +137,19 @@ def build_argument(ext: ExtArgument, text: str, max_paraphrases: int = 2) -> Arg
                                                   "ref": a.source if a.source not in ids else a.target}))
             continue
         arg.attacks.append(Attack(a.kind, a.source, a.target))
+    used = set()
+    for i, a in enumerate(ext.ambiguities[:MAX_AMBIGUITIES]):
+        senses = [Sense(s.label, s.description, {r.prop: r.text for r in s.readings if r.prop in ids})
+                  for s in a.senses[:MAX_SENSES]]
+        touched = {q for s in senses for q in s.readings}
+        if len(senses) < 2 or not touched or touched & used:
+            arg.warnings.append(Warn("dangling", {"id": f"ambiguity:{a.term}", "ref": ",".join(sorted(touched & used)) or a.term}))
+            continue
+        used |= touched
+        for s in senses:  # 書き換えが無い命題は原文のままとする
+            for q in touched:
+                s.readings.setdefault(q, arg.prop(q).text)
+        arg.ambiguities.append(Ambiguity(f"m{len(arg.ambiguities) + 1}", a.kind, a.term, senses))
     if arg.props and not any(p.kind == "conclusion" for p in arg.props):
         arg.warnings.append(Warn("no_conclusion"))
     return arg
