@@ -155,10 +155,15 @@ def build_argument(ext: ExtArgument, text: str, max_paraphrases: int = 2) -> Arg
     return arg
 
 
-def extract(text: str, model: str = DEFAULT_MODEL, client: Optional[anthropic.Anthropic] = None,
-            max_paraphrases: int = 2) -> Argument:
+def request(text: str, model: str = DEFAULT_MODEL, client: Optional[anthropic.Anthropic] = None) -> ExtArgument:
+    """Claude に論証全体を1回で抽出させる（検証前の生の結果）"""
     client = client or anthropic.Anthropic()
     resp = client.messages.parse(
         model=model, max_tokens=8192, system=EXTRACT_SYSTEM,
         messages=[{"role": "user", "content": text}], output_format=ExtArgument)
-    return build_argument(resp.parsed_output, text, max_paraphrases)
+    return resp.parsed_output
+
+
+def extract(text: str, model: str = DEFAULT_MODEL, client: Optional[anthropic.Anthropic] = None,
+            max_paraphrases: int = 2) -> Argument:
+    return build_argument(request(text, model, client), text, max_paraphrases)

@@ -10,10 +10,11 @@ import anthropic
 from .decision import CachedModel, DecisionModel, make_backend
 from .evidence import EvidenceIndex
 from .estimate import estimate_attack, estimate_inference, estimate_prop, estimate_senses
-from .extract import DEFAULT_MODEL, extract
+from .extract import DEFAULT_MODEL
 from .graph import Argument, Warn
 from .interpret import MAX_READINGS, Mixture, mix
 from .i18n import resolve_lang
+from .pipeline import OneShotClaude, Stage, run_stages
 from .propagate import Propagation, PropResult, goals, propagate, status, wide_warnings
 
 
@@ -51,13 +52,14 @@ class NatLean:
                  paraphrases: int = 2, threshold: float = 0.8, lang: Optional[str] = None,
                  log: Optional[str] = None, workers: int = 8,
                  interpret: bool = True, max_readings: int = MAX_READINGS,
-                 evidence: Optional[EvidenceIndex] = None):
+                 evidence: Optional[EvidenceIndex] = None, stages: Optional[List[Stage]] = None):
         if mode not in ("assume", "estimate"):
             raise ValueError(f"unknown mode: {mode}")
         self.decision = CachedModel(decision or make_backend(claude_model=extract_model, client=client), log)
         self.mode = mode
         self.extract_model = extract_model
         self.client = client
+        self.stages = stages or [OneShotClaude(extract_model, client)]
         self.paraphrases = paraphrases
         self.threshold = threshold
         self.lang = resolve_lang(lang)
@@ -114,5 +116,5 @@ class NatLean:
                       gs, mixture)
 
     def check(self, text: str) -> Result:
-        arg = extract(text, self.extract_model, self.client, self.paraphrases)
+        arg = run_stages(text, self.stages, self.paraphrases)
         return self.check_argument(arg)
