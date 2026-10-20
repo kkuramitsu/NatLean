@@ -13,6 +13,7 @@ from typing import List, Optional
 
 from . import __version__
 from .checker import NatLean
+from .evidence import EvidenceIndex
 from .decision import DecisionError, make_backend
 from .extract import DEFAULT_MODEL
 from .i18n import resolve_lang, t
@@ -24,7 +25,8 @@ def build_parser(lang: str) -> argparse.ArgumentParser:
     ap.add_argument("-h", "--help", action="help", help=t("cli.help", lang))
     ap.add_argument("file", help=t("cli.file", lang))
     ap.add_argument("--lang", choices=["ja", "en"], help=t("cli.lang", lang))
-    ap.add_argument("--mode", choices=["assume", "estimate"], default="assume", help=t("cli.mode", lang))
+    ap.add_argument("--mode", choices=["assume", "estimate"], help=t("cli.mode", lang))
+    ap.add_argument("--evidence", action="append", metavar="PATH", help=t("cli.evidence", lang))
     ap.add_argument("--backend", choices=["jev", "claude"], help=t("cli.backend", lang))
     ap.add_argument("--jev-model", default="jev-latest", help=t("cli.jev_model", lang))
     ap.add_argument("--model", default=DEFAULT_MODEL, help=t("cli.model", lang))
@@ -59,8 +61,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not text.strip():
             print(t("cli.error.empty", lang), file=sys.stderr)
             return 2
+        evidence = EvidenceIndex.from_paths(args.evidence) if args.evidence else None
+        mode = args.mode or ("estimate" if evidence else "assume")
         decision = make_backend(args.backend, jev_model=args.jev_model, claude_model=args.model)
-        res = NatLean(decision, mode=args.mode, extract_model=args.model, paraphrases=args.paraphrases,
+        res = NatLean(decision, mode=mode, evidence=evidence, extract_model=args.model, paraphrases=args.paraphrases,
                       threshold=args.threshold, lang=lang, log=args.log,
                       interpret=not args.no_interpret, max_readings=args.max_readings).check(text)
     except DecisionError as e:

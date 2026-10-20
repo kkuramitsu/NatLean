@@ -5,6 +5,7 @@ from dataclasses import asdict
 from typing import List
 
 from .checker import Result
+from .graph import Interval
 from .i18n import t
 from .propagate import attack_id, status, weakest_links
 
@@ -26,7 +27,11 @@ def report(res: Result, lang: str = "") -> str:
         r = res.final(p.id) if p.id in res.goals else prop.props[p.id]
         es = by_concl.get(p.id, [])
         if not es:
-            lines.append(f"{p.id:<4}[{p.kind}] {p.text}    {t('assumed', lang)}")
+            tag = f"p={p.p.est:.2f}" if p.cites or p.p != Interval(1.0, 1.0, 1.0) else t("assumed", lang)
+            lines.append(f"{p.id:<4}[{p.kind}] {p.text}    {tag}")
+            for c in p.cites:
+                rel = t(f"relation.{c.relation}", lang)
+                lines.append(f"      {t('cite', lang, source=c.source, index=c.index, relation=rel, p=c.p)}")
             continue
         mark = MARK[status(r, res.threshold)]
         sorry = "  sorry" if mark == "✗" else ""
@@ -59,7 +64,7 @@ def report(res: Result, lang: str = "") -> str:
 
 def _result(r) -> dict:
     d = asdict(r)
-    d["leaves"], d["edges"] = sorted(r.leaves), sorted(r.edges)
+    d["leaves"], d["edges"], d["sources"] = sorted(r.leaves), sorted(r.edges), sorted(r.sources)
     return d
 
 

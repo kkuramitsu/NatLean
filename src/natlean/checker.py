@@ -8,6 +8,7 @@ from typing import List, Optional, Set
 import anthropic
 
 from .decision import CachedModel, DecisionModel, make_backend
+from .evidence import EvidenceIndex
 from .estimate import estimate_attack, estimate_inference, estimate_prop, estimate_senses
 from .extract import DEFAULT_MODEL, extract
 from .graph import Argument, Warn
@@ -49,7 +50,8 @@ class NatLean:
                  extract_model: str = DEFAULT_MODEL, client: Optional[anthropic.Anthropic] = None,
                  paraphrases: int = 2, threshold: float = 0.8, lang: Optional[str] = None,
                  log: Optional[str] = None, workers: int = 8,
-                 interpret: bool = True, max_readings: int = MAX_READINGS):
+                 interpret: bool = True, max_readings: int = MAX_READINGS,
+                 evidence: Optional[EvidenceIndex] = None):
         if mode not in ("assume", "estimate"):
             raise ValueError(f"unknown mode: {mode}")
         self.decision = CachedModel(decision or make_backend(claude_model=extract_model, client=client), log)
@@ -62,6 +64,7 @@ class NatLean:
         self.workers = workers
         self.interpret = interpret
         self.max_readings = max_readings
+        self.evidence = evidence
 
     def estimate(self, arg: Argument, touched: Optional[Set[str]] = None) -> None:
         """決定モデルで p・r・攻撃の強さ・パターンの分類を推定して arg に書き込む。
@@ -77,10 +80,13 @@ class NatLean:
         ein = {e.id for e in eis}
         ais = [a for a in arg.attacks if hit(a.source) or (a.target in ein if a.kind == "undercut" else hit(a.target))]
         with ThreadPoolExecutor(max_workers=self.workers) as ex:
-            for p, iv in zip(leaves, ex.map(lambda p: estimate_prop(self.decision, p, lang), leaves)):
-                p.p = iv
+            ests = list(ex.map(lambda p: estimate_prop(self.decision, p, lang, self.evidence), leaves))
             infs = list(ex.map(lambda e: estimate_inference(self.decision, arg, e, lang), eis))
             atks = list(ex.map(lambda a: estimate_attack(self.decision, arg, a, lang), ais))
+        for p, (iv, cites, warns) in zip(leaves, ests):
+            p.p, p.cites = iv, cites
+            if full:
+                arg.warnings += warns
         for e, (r, probs) in zip(eis, infs):
             e.r, e.pattern_probs = r, probs
             if not full:

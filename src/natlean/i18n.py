@@ -21,6 +21,9 @@ MESSAGES = {
     "weakest.edge": {"ja": "推論 {id}", "en": "inference {id}"},
     "weakest.attack": {"ja": "攻撃 {id}（これが無ければ）", "en": "attack {id} (without it)"},
     "readings": {"ja": "解釈 {term}:", "en": "readings of {term}:"},
+    "cite": {"ja": "↳ {source}#{index} {relation} {p:.2f}", "en": "↳ {source}#{index} {relation} {p:.2f}"},
+    "relation.supports": {"ja": "裏付け", "en": "supports"},
+    "relation.contradicts": {"ja": "否定", "en": "contradicts"},
     "legend": {"ja": "L=下限（依存を仮定しない） P̂=独立を仮定した推定 U=上限",
                "en": "L=lower bound (no independence assumed)  P̂=independent estimate  U=upper bound"},
     "backend": {"ja": "判定モデル: {name}", "en": "decision model: {name}"},
@@ -54,6 +57,15 @@ MESSAGES = {
     "warn.readings_truncated": {
         "ja": "解釈の組み合わせが多いため、確からしさの小さい割り当て（質量 {mass:.2f}）を打ち切った（下限は低く、上限は高くなる）",
         "en": "too many combinations of readings; dropped the least likely ones (mass {mass:.2f}), which lowers L and raises U"},
+    "warn.shared_source": {
+        "ja": "{id}: 複数の根拠が同じ出どころ（{source}）に基づくため、独立とみなさず大きい方をとった",
+        "en": "{id}: several supports rest on the same source ({source}); not treated as independent, the larger one is used"},
+    "warn.no_evidence": {
+        "ja": "{id}: 根拠文書に該当する記述が無く、モデルの事前知識で推定した",
+        "en": "{id}: no relevant passage in the evidence; estimated from the model's prior knowledge"},
+    "warn.evidence_conflict": {
+        "ja": "{id}: 根拠文書の記述が食い違っている（裏付けと否定が混在）",
+        "en": "{id}: the evidence passages disagree (both supporting and contradicting)"},
     "warn.no_conclusion": {"ja": "結論が指定されていないため、最後の命題をゴールとした",
                            "en": "no conclusion was marked; the last proposition is used as the goal"},
     # --- CLI ---
@@ -72,6 +84,8 @@ MESSAGES = {
     "cli.paraphrases": {"ja": "命題あたりの言い換え数", "en": "paraphrases per proposition"},
     "cli.no_interpret": {"ja": "曖昧さ（量化・語義）の解釈の混合をしない", "en": "do not mix over readings of ambiguous terms"},
     "cli.max_readings": {"ja": "評価する解釈の割り当ての数の上限", "en": "maximum number of reading assignments to evaluate"},
+    "cli.evidence": {"ja": "根拠文書のファイルまたはディレクトリ（複数可。指定すると --mode の既定は estimate）",
+                     "en": "evidence file or directory (repeatable; makes estimate the default --mode)"},
     "cli.log": {"ja": "判断ログ兼キャッシュの JSONL ファイル", "en": "JSONL file for the decision log and cache"},
     "cli.json": {"ja": "JSON で出力", "en": "output JSON"},
     "cli.error.backend": {"ja": "エラー: {name} の API キーが設定されていません（{env}）",
