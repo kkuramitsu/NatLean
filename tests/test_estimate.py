@@ -73,7 +73,8 @@ def test_estimate_prop_uses_paraphrase_and_negation_complement():
         return 0.2 if "誤り" in state["statement"] else 0.9
 
     p = Prop("p1", "月は丸い", paraphrases=["月は球形だ"])
-    iv = estimate_prop(FakeBackend(h), p, "ja")
+    iv, cites, warns = estimate_prop(FakeBackend(h), p, "ja")
+    assert cites == [] and warns == []  # 根拠を渡していない
     assert (iv.lo, iv.hi) == (pytest.approx(0.8), pytest.approx(0.9))
     assert len(seen) == 3 and Q["ja"]["negate"].format(s="月は丸い") in seen
 
