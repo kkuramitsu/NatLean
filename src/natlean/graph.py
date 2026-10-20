@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from statistics import mean
-from typing import Dict, List, Literal, Sequence
+from typing import Dict, FrozenSet, List, Literal, Sequence
 
 Lang = Literal["ja", "en"]
 Kind = Literal["premise", "definition", "assumption", "intermediate", "conclusion"]
@@ -52,6 +52,15 @@ class Warn:
 
 
 @dataclass
+class Cite:
+    """命題が引用した根拠 passage。relation は supports / contradicts、p はその passage のもとでの真の確率"""
+    source: str
+    index: int
+    relation: str
+    p: float
+
+
+@dataclass
 class Prop:
     id: str
     text: str
@@ -59,6 +68,12 @@ class Prop:
     quote: str = ""
     paraphrases: List[str] = field(default_factory=list)
     p: Interval = Interval(1.0, 1.0, 1.0)  # assume モードでは真と置く
+    cites: List[Cite] = field(default_factory=list)
+
+    @property
+    def sources(self) -> FrozenSet[str]:
+        """引用した出どころ"""
+        return frozenset(c.source for c in self.cites)
 
 
 @dataclass

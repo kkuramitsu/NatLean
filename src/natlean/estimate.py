@@ -6,10 +6,11 @@
 """
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .decision import Choice, DecisionModel, Noul, Question
-from .graph import STRICT_PATTERNS, Ambiguity, Argument, Attack, Inference, Interval, Prop
+from .evidence import EvidenceIndex
+from .graph import STRICT_PATTERNS, Ambiguity, Argument, Attack, Cite, Inference, Interval, Prop, Warn
 
 # 問いのテンプレート（入力の言語で選ぶ）
 Q = {
@@ -23,6 +24,8 @@ Q = {
         "rebut": "source が真だとして、target は偽か。",
         "undercut": "source が真なら、premises から conclusion を導くこの推論は適用できなくなるか。",
         "sense": "この文脈で、term はどの意味で使われているか。",
+        "relation": "evidence は statement を裏付けるか、否定するか、無関係か。",
+        "true_given": "evidence を根拠として、statement は真か。",
     },
     "en": {
         "true": "Is this statement true?",
@@ -34,6 +37,8 @@ Q = {
         "rebut": "Assuming source is true, is target false?",
         "undercut": "If source is true, does the inference from the premises to the conclusion cease to apply?",
         "sense": "In this context, in which sense is the term used?",
+        "relation": "Does the evidence support the statement, contradict it, or is it unrelated?",
+        "true_given": "Taking the evidence as the basis, is the statement true?",
     },
 }
 
@@ -64,16 +69,58 @@ PATTERN_DOC = {
 }
 
 
+# 根拠 passage と命題の関係（Choice の選択肢）
+RELATION_DOC = {
+    "ja": {"supports": "passage は命題を裏付ける", "contradicts": "passage は命題を否定する",
+           "unrelated": "passage は命題と無関係である"},
+    "en": {"supports": "the passage supports the statement", "contradicts": "the passage contradicts the statement",
+           "unrelated": "the passage is unrelated to the statement"},
+}
+UNRELATED = 0.5  # 無関係の確率がこれ未満の passage を根拠として使う
+
+
 def _noul(model: DecisionModel, state: object, instr: str) -> float:
     return model.ask(state, {"q": Noul(instr)})["q"]
 
 
-def estimate_prop(model: DecisionModel, prop: Prop, lang: str) -> Interval:
-    """命題の確かさ p。原文・言い換え・否定（の補数）への「真か」の答えの区間"""
+def _estimate_prior(model: DecisionModel, prop: Prop, lang: str) -> Interval:
+    """根拠なしの p。原文・言い換え・否定（の補数）への「真か」の答えの区間"""
     q = Q[lang]
     vals = [_noul(model, {"statement": s}, q["true"]) for s in [prop.text, *prop.paraphrases]]
     vals.append(1.0 - _noul(model, {"statement": q["negate"].format(s=prop.text)}, q["true"]))
     return Interval.of(vals)
+
+
+def estimate_prop(model: DecisionModel, prop: Prop, lang: str,
+                  evidence: Optional[EvidenceIndex] = None) -> Tuple[Interval, List[Cite], List[Warn]]:
+    """命題の確かさ p と、引用した根拠、警告
+
+    根拠が無ければ根拠なしの推定。根拠があれば P(命題 | passage) を passage ごとに求め、
+    無関係でない passage の値（と、命題の否定への補数）の最小・平均・最大を区間とする。"""
+    if evidence is None:
+        return _estimate_prior(model, prop, lang), [], []
+    q = Q[lang]
+    cites: List[Cite] = []
+    vals: List[float] = []
+    for passage, _ in evidence.search(prop.text):
+        state = {"statement": prop.text, "evidence": passage.text}
+        ans = model.ask(state, {"rel": Choice(q["relation"], dict(RELATION_DOC[lang])),
+                                "true": Noul(q["true_given"])})
+        rel = ans["rel"]
+        if rel.get("unrelated", 0.0) >= UNRELATED:
+            continue
+        neg = _noul(model, {"statement": q["negate"].format(s=prop.text), "evidence": passage.text}, q["true_given"])
+        vals += [ans["true"], 1.0 - neg]
+        cites.append(Cite(passage.source, passage.index,
+                          "supports" if rel.get("supports", 0.0) >= rel.get("contradicts", 0.0) else "contradicts",
+                          ans["true"]))
+    warns: List[Warn] = []
+    if not cites:
+        warns.append(Warn("no_evidence", {"id": prop.id}))
+        return _estimate_prior(model, prop, lang), [], warns
+    if {c.relation for c in cites} == {"supports", "contradicts"}:
+        warns.append(Warn("evidence_conflict", {"id": prop.id}))
+    return Interval.of(vals), cites, warns
 
 
 def _inference_state(arg: Argument, e: Inference, conclusion: str) -> dict:
